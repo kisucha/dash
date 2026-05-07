@@ -1,0 +1,16 @@
+# Dash 백엔드 의존성 패키지 목록
+# Python 3.10 (32비트) 환경 기준
+
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+sqlalchemy==2.0.30
+aiosqlite==0.20.0
+httpx==0.27.0
+apscheduler==3.10.4
+pydantic==2.7.1
+python-multipart==0.0.9
+python-dotenv>=1.0.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
+lxml_html_clean>=0.4.0
+trafilatura>=2.0.0

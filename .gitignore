@@ -1,0 +1,39 @@
+# 환경변수 (API 키 포함 — 절대 커밋 금지)
+.env
+
+# Python 캐시
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# Node.js
+frontend/node_modules/
+frontend/dist/
+
+# SQLite DB (로컬 데이터 — 저장소에 포함 불필요)
+storage/dash.db
+storage/*.db
+
+# 로그 파일
+storage/*.log
+*.log
+
+# OS 메타데이터
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# 임시 파일
+*.tmp
+*.bak
