@@ -31,13 +31,13 @@ export const getFeature = (id) => api.get(`/api/features/${id}`)
 // Tasks API — 작업 생성, 조회, 취소
 // ────────────────────────────────────────────────
 
-// 작업 목록 조회 (페이지네이션 지원)
-export const getTasks = (limit = 20, offset = 0) =>
-  api.get('/api/tasks', { params: { limit, offset } })
+// 작업 목록 조회 (cursor 기반 페이징 — cursor 없으면 최신 N개 첫 페이지)
+export const getTasks = (limit = 20, cursor = null) =>
+  api.get('/api/tasks', { params: { limit, ...(cursor != null ? { cursor } : {}) } })
 
-// 특정 업무의 작업 이력 조회 (feature_id 필터)
-export const getTasksByFeature = (featureId, limit = 50, offset = 0) =>
-  api.get('/api/tasks', { params: { feature_id: featureId, limit, offset } })
+// 특정 업무의 작업 이력 조회 (feature_id 필터, cursor 기반 페이징)
+export const getTasksByFeature = (featureId, limit = 50, cursor = null) =>
+  api.get('/api/tasks', { params: { feature_id: featureId, limit, ...(cursor != null ? { cursor } : {}) } })
 
 // 특정 작업 상세 조회
 export const getTask = (id) => api.get(`/api/tasks/${id}`)
@@ -104,3 +104,20 @@ export const sendChatStream = (message, history = [], searchContext = null, sear
       refined_query: refinedQuery,
     }),
   })
+
+// ────────────────────────────────────────────────
+// Model Assets API — F003 영상제작 모델 관리
+// ────────────────────────────────────────────────
+
+// 모델 인벤토리 목록 조회 (model_type, base_model 필터 가능)
+export const getModelAssets = (modelType = null, baseModel = null) =>
+  api.get('/api/model-assets', { params: { ...(modelType ? { model_type: modelType } : {}), ...(baseModel ? { base_model: baseModel } : {}) } })
+
+// 진행 중인 다운로드 목록 조회
+export const getDownloads = () => api.get('/api/model-assets/downloads')
+
+// 다운로드 트리거
+export const triggerDownload = (payload) => api.post('/api/model-assets/download', payload)
+
+// 로컬 모델 재스캔
+export const scanLocalModels = () => api.post('/api/model-assets/scan')

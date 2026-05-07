@@ -330,3 +330,120 @@
 ### 변경 이유
 사용자 요청에 따른 로드맵 조정 및 신기능(F003) 연구·계획 수립.
 구현은 아직 시작하지 않음 — "구현해줘" 트리거 대기 중.
+
+---
+
+## [2026-05-07] Phase 1~18 전체 구현 완료 — cursor 페이징 + F003 영상제작 파이프라인
+
+- 변경 내용:
+
+### 1. Cursor 기반 페이징 전환 (P1)
+- `backend/schemas/task.py`:
+  - `TaskListResponse`: `total` 필드 제거, `next_cursor: int|None`, `has_more: bool` 추가
+- `backend/routers/tasks.py`:
+  - `list_tasks`: `offset` 파라미터 → `cursor: int|None` 변경
+  - SQL: `WHERE id < cursor ORDER BY id DESC LIMIT limit+1` 구조
+- `backend/services/task_service.py`:
+  - `list_tasks()`: cursor 기반 SQL 쿼리로 재구현
+- `frontend/src/api/index.js`:
+  - `getTasks(limit, cursor)`, `getTasksByFeature(featureId, limit, cursor)` cursor 기반으로 변경
+- `frontend/src/store/tasks.js`:
+  - `nextCursor`, `hasMore` 상태 추가
+  - `fetchMoreTasks()` 메서드 추가
+  - `totalTasks` 제거
+- `frontend/src/views/DashboardView.vue`:
+  - `fetchTasks(10, 0)` → `fetchTasks(10)` 시그니처 변경
+
+### 2. DB 스키마 추가 (P2)
+- `backend/core/database.py`:
+  - `model_inventory` 테이블 (filename UNIQUE 제약)
+  - `model_download_queue` 테이블
+
+### 3. F003 Feature 정의 (P3)
+- `backend/routers/features.py`:
+  - F003 영상제작 항목 추가
+  - 24개 입력 필드 (영상유형, 아트스타일, 촬영스타일, 배경, 인물, 감정, 무드, 색상톤 등)
+  - art_style options에 "flux" 추가 (Flux.1 지원)
+
+### 4. F003 파이프라인 핵심 모듈 (P4-P13)
+- `pipelines/f003_video_creation/comfyui_client.py`:
+  - ComfyUI REST API + WebSocket 클라이언트
+  - 취소 시 `POST /interrupt` 전송 → GPU 즉시 해제
+- `pipelines/f003_video_creation/prompt_generator.py`:
+  - Ollama 기반 SD/Flux.1 프롬프트 생성
+- `pipelines/f003_video_creation/style_mapper.py`:
+  - 사용자 선택 스타일 → ComfyUI 워크플로우 매핑
+- `pipelines/f003_video_creation/model_manager.py`:
+  - 모델 인벤토리 + 자동 다운로드 관리
+  - `download_from_hf`: model_type 파라미터 추가 (기존 "checkpoint" 하드코딩 수정)
+- `pipelines/f003_video_creation/pipeline.py`:
+  - F003Pipeline 메인 실행 로직 (11단계)
+  - 절대 경로 `r"C:\Develop\Dash"` → `Path(__file__).parent.parent.parent` 상대 경로로 수정
+- `pipelines/f003_video_creation/config.json`:
+  - "flux" 스타일 매핑 추가 (base_model: Flux.1)
+- `pipelines/f003_video_creation/workflows/animatediff_base.json`:
+  - AnimateDiff 기본 워크플로우
+- `pipelines/f003_video_creation/workflows/flux_base.json`:
+  - Flux.1 기본 워크플로우 (고아 노드 3, 4 제거)
+
+### 5. 백엔드 모델·다운로드 관리 (P4-P13 계속)
+- `backend/services/model_service.py`:
+  - model_inventory CRUD 로직
+- `backend/services/download_service.py`:
+  - 다운로드 큐 관리
+- `backend/routers/model_assets.py`:
+  - `/api/model-assets` 엔드포인트
+  - 보안: filename 경로 순회 취약점 패치 (os.path.basename 검증)
+- `backend/schemas/model_asset.py`:
+  - ModelAsset 요청/응답 스키마
+- `backend/main.py`:
+  - model_assets 라우터 등록
+  - `/results/f003` StaticFiles 마운트
+  - 절대 경로 → Path(__file__).parent.parent 상대 경로로 수정
+
+### 6. F003 프론트엔드 (P14-P16)
+- `frontend/src/views/F003View.vue`:
+  - 3단계 다단계 UI: 유형→스타일→파라미터
+  - "Flux.1 (고품질)" 아트 스타일 추가
+- `frontend/src/router/index.js`:
+  - `/features/F003` 라우트 추가 (F003View 전용)
+- `frontend/src/views/TaskDetailView.vue`:
+  - F003 미디어(이미지/동영상) 렌더링 블록 추가
+
+### 7. Vite 프록시 설정 (P17) — Critical 버그
+- `frontend/vite.config.js`:
+  - `/results` 경로 프록시 추가 → F003 결과 이미지/동영상 404 해결
+
+### 8. Pipeline Runner 중복 업데이트 수정 (P18)
+- `pipelines/runner.py`:
+  - run() 완료 후 DB 상태 확인 후 DONE이 아닌 경우에만 보장용 업데이트 실행
+
+### 9. 결과 저장소
+- `storage/results/f003/`: 신규 생성 (이미지/동영상 저장)
+
+- 변경 이유:
+  1. 페이징 개선: offset 기반 → cursor 기반으로 전환 (무한 스크롤 + 동시성 안전)
+  2. F003 구현: 영상 생성(동영상/이미지), ComfyUI 워크플로우 자동화, 모델 자동 관리
+  3. 프로세스 안정화: runner.py 중복 업데이트 방지, 경로 상대화
+
+- 영향 범위:
+  - Backend: schemas, routers, services (model, download), main.py
+  - Frontend: api, store, views (DashboardView, F003View, TaskDetailView), router, vite.config.js
+  - Pipelines: f003 전체 모듈 신규, base.py 수정 없음
+  - DB: model_inventory, model_download_queue 테이블 신규
+
+- Critic 검토 결과:
+  - Critical 5개: vite.config.js /results 프록시 누락, 경로 순회 보안 취약점, 절대 경로 하드코딩, 중복 DONE 업데이트, JSON 파일 형식
+  - Major 7개: 에러 처리 미흡, 로깅 부족, 타입 검증 결함, 문서 미비
+  - Minor 4개: 코멘트 누락, CSS 정렬, 불필요 import 등
+  - 모두 수정 완료
+
+- 검증 완료:
+  - P1: cursor 페이징 동작 ✓
+  - P3: F003 feature 정의 조회 ✓
+  - P4-P13: ComfyUI 클라이언트 연동, 모델 다운로드, 프롬프트 생성 ✓
+  - P14-P16: F003View 3단계 폼, TaskDetailView 미디어 렌더링 ✓
+  - P17: /results/f003 프록시 ✓ (이미지/동영상 접근 가능)
+  - P18: 중복 업데이트 제거 ✓
+
+- 담당 에이전트: pipeline-builder, api-builder, web-builder, critic

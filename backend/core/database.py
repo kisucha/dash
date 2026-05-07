@@ -41,6 +41,40 @@ CREATE TABLE IF NOT EXISTS settings (
 )
 """
 
+# AI 이미지/동영상 생성에 사용하는 모델 파일 인벤토리 (F003 영상제작 파이프라인 용)
+_CREATE_MODEL_INVENTORY = """
+CREATE TABLE IF NOT EXISTS model_inventory (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    model_type          TEXT    NOT NULL,
+    name                TEXT    NOT NULL,
+    filename            TEXT    NOT NULL UNIQUE,
+    local_path          TEXT    NOT NULL,
+    civitai_version_id  INTEGER,
+    hf_repo_id          TEXT,
+    is_downloaded       INTEGER NOT NULL DEFAULT 0,
+    file_size_mb        REAL,
+    downloaded_at       DATETIME,
+    base_model          TEXT,
+    style_tags          TEXT
+)
+"""
+
+# 모델 파일 다운로드 작업 큐 (F003 영상제작 파이프라인 용)
+_CREATE_MODEL_DOWNLOAD_QUEUE = """
+CREATE TABLE IF NOT EXISTS model_download_queue (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    source          TEXT    NOT NULL,
+    model_type      TEXT    NOT NULL,
+    source_id       TEXT    NOT NULL,
+    target_path     TEXT    NOT NULL,
+    status          TEXT    NOT NULL DEFAULT 'QUEUED',
+    progress_pct    REAL    DEFAULT 0,
+    error_message   TEXT,
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    finished_at     DATETIME
+)
+"""
+
 
 async def init_db() -> None:
     """DB 파일이 없으면 생성하고 테이블을 초기화한다."""
@@ -48,6 +82,8 @@ async def init_db() -> None:
         await conn.execute(_CREATE_TASKS)
         await conn.execute(_CREATE_SCHEDULES)
         await conn.execute(_CREATE_SETTINGS)
+        await conn.execute(_CREATE_MODEL_INVENTORY)
+        await conn.execute(_CREATE_MODEL_DOWNLOAD_QUEUE)
         await conn.commit()
 
 

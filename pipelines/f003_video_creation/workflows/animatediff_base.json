@@ -1,0 +1,90 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "cyberrealisticPony.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "masterpiece, best quality, 1girl, solo"
+    }
+  },
+  "3": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "worst quality, low quality, nsfw, blurry, watermark"
+    }
+  },
+  "4": {
+    "class_type": "ADE_LoadAnimateDiffModel",
+    "inputs": {
+      "model_name": "mm_sd_v15_v2.ckpt"
+    }
+  },
+  "5": {
+    "class_type": "ADE_AnimateDiffSamplingSettings",
+    "inputs": {
+      "batch_size": 16,
+      "seed_gen": "comfy",
+      "seed_gen_override": -1,
+      "closed_loop": "N",
+      "beta_schedule": "sqrt_linear (AnimateDiff)"
+    }
+  },
+  "6": {
+    "class_type": "ADE_ApplyAnimateDiffModel",
+    "inputs": {
+      "motion_model": ["4", 0],
+      "unet": ["1", 0],
+      "start_percent": 0.0,
+      "end_percent": 1.0,
+      "sampling_settings": ["5", 0]
+    }
+  },
+  "7": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": ["6", 0],
+      "positive": ["2", 0],
+      "negative": ["3", 0],
+      "latent_image": ["8", 0],
+      "seed": -1,
+      "steps": 20,
+      "cfg": 7.0,
+      "sampler_name": "euler",
+      "scheduler": "linear",
+      "denoise": 1.0
+    }
+  },
+  "8": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 512,
+      "height": 768,
+      "batch_size": 1
+    }
+  },
+  "9": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["7", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "10": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["9", 0],
+      "frame_rate": 8,
+      "loop_count": 0,
+      "filename_prefix": "AnimateDiff",
+      "format": "video/h264-mp4",
+      "pingpong": false,
+      "save_output": true
+    }
+  }
+}

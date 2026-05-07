@@ -1,6 +1,5 @@
 // store/tasks.js — Tasks 및 Features 전역 상태 관리 Pinia 스토어
-// 작업 목록, 기능 목록, 전체 작업 수를 state로 보유하고
-// fetchTasks, fetchFeatures, createTask, cancelTask 액션을 제공한다
+// cursor 기반 페이징 지원: nextCursor, hasMore 상태 및 fetchMoreTasks 액션 제공
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import {
@@ -20,21 +19,36 @@ export const useTaskStore = defineStore('tasks', () => {
   const tasks = ref([])
   // 업무(Feature) 목록 배열
   const features = ref([])
-  // 전체 작업 수 (페이지네이션용)
-  const totalTasks = ref(0)
+  // cursor 기반 페이징 상태
+  const nextCursor = ref(null)
+  const hasMore = ref(false)
 
   // ────────────────────────────────────────────────
   // Actions
   // ────────────────────────────────────────────────
 
-  // 작업 목록을 백엔드에서 가져와 state에 반영
-  async function fetchTasks(limit = 20, offset = 0) {
+  // 작업 목록을 백엔드에서 가져와 state에 반영 (첫 페이지 또는 cursor 지정 페이지)
+  async function fetchTasks(limit = 20, cursor = null) {
     try {
-      const res = await apiGetTasks(limit, offset)
+      const res = await apiGetTasks(limit, cursor)
       tasks.value = res.data.items ?? []
-      totalTasks.value = res.data.total ?? 0
+      nextCursor.value = res.data.next_cursor ?? null
+      hasMore.value = res.data.has_more ?? false
     } catch (err) {
       console.error('[TaskStore] fetchTasks 실패:', err)
+    }
+  }
+
+  // 다음 페이지를 기존 목록에 이어 붙임 (무한 스크롤 / 더 보기)
+  async function fetchMoreTasks(limit = 20) {
+    if (!hasMore.value || nextCursor.value == null) return
+    try {
+      const res = await apiGetTasks(limit, nextCursor.value)
+      tasks.value = [...tasks.value, ...(res.data.items ?? [])]
+      nextCursor.value = res.data.next_cursor ?? null
+      hasMore.value = res.data.has_more ?? false
+    } catch (err) {
+      console.error('[TaskStore] fetchMoreTasks 실패:', err)
     }
   }
 
@@ -63,8 +77,18 @@ export const useTaskStore = defineStore('tasks', () => {
   async function deleteTaskRecord(id) {
     await apiDeleteTaskRecord(id)
     tasks.value = tasks.value.filter(t => t.id !== id)
-    totalTasks.value = Math.max(0, totalTasks.value - 1)
   }
 
-  return { tasks, features, totalTasks, fetchTasks, fetchFeatures, createTask, cancelTask, deleteTaskRecord }
+  return {
+    tasks,
+    features,
+    nextCursor,
+    hasMore,
+    fetchTasks,
+    fetchMoreTasks,
+    fetchFeatures,
+    createTask,
+    cancelTask,
+    deleteTaskRecord,
+  }
 })

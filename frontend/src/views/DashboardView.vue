@@ -50,7 +50,7 @@ let ollamaTimer = null
 
 function startPolling() {
   if (pollTimer) return
-  pollTimer = setInterval(() => taskStore.fetchTasks(10, 0), 10000)
+  pollTimer = setInterval(() => taskStore.fetchTasks(10), 10000)
   ollamaTimer = setInterval(() => ollama.loadModels(), 30000)
 }
 
@@ -61,7 +61,7 @@ function stopPolling() {
 
 onMounted(async () => {
   taskStore.fetchFeatures().catch(() => {})
-  taskStore.fetchTasks(10, 0).catch(() => {})
+  taskStore.fetchTasks(10).catch(() => {})
   if (ollama.status === 'loading') {
     await ollama.loadModels()
   } else {

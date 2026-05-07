@@ -776,26 +776,26 @@ const f003IsVideo = computed(() =>
 
 ## 4. 구현 순서 (Phase 단위)
 
-| Phase | 작업 내용 | 담당 에이전트 | 의존성 |
-|-------|---------|-------------|--------|
-| P1 | cursor 기반 페이징 전환 (백엔드 4개 파일 + 프론트 3개 파일) | api-builder + web-builder | 없음 |
-| P2 | DB 스키마 추가 (model_inventory, model_download_queue) | api-builder | 없음 |
-| P3 | features.py F003 항목 추가 | api-builder | 없음 |
-| P4 | comfyui_client.py 구현 (REST + WebSocket) | pipeline-builder | 없음 |
-| P5 | config.json + style_mapper.py 구현 | pipeline-builder | P3 |
-| P6 | prompt_generator.py 구현 | pipeline-builder | 없음 |
-| P7 | model_manager.py 구현 | pipeline-builder | P2, P4 |
-| P8 | animatediff_base.json + flux_base.json 기본 워크플로우 JSON 작성 | pipeline-builder | P4 |
-| P9 | pipeline.py F003 메인 로직 구현 | pipeline-builder | P4, P5, P6, P7, P8 |
-| P10 | runner.py F003 등록 | pipeline-builder | P9 |
-| P11 | backend model_service + download_service 구현 | api-builder | P2 |
-| P12 | backend model_assets 라우터 + 스키마 구현 | api-builder | P11 |
-| P13 | main.py model_assets 라우터 + StaticFiles 등록 | api-builder | P12 |
-| P14 | F003View.vue 프론트엔드 구현 | web-builder | P3, P12 |
-| P15 | router/index.js F003 라우트 추가 | web-builder | P14 |
-| P16 | TaskDetailView.vue F003 미디어 렌더링 추가 | web-builder | P14 |
-| P17 | storage/results/f003/ 디렉토리 생성 확인 | api-builder | 없음 |
-| P18 | 전체 통합 검토 및 테스트 | critic | P1~P17 |
+| Phase | 작업 내용 | 담당 에이전트 | 의존성 | 상태 |
+|-------|---------|-------------|--------|------|
+| P1 | cursor 기반 페이징 전환 (백엔드 4개 파일 + 프론트 3개 파일) | api-builder + web-builder | 없음 | **구현완료** |
+| P2 | DB 스키마 추가 (model_inventory, model_download_queue) | api-builder | 없음 | **구현완료** |
+| P3 | features.py F003 항목 추가 | api-builder | 없음 | **구현완료** |
+| P4 | comfyui_client.py 구현 (REST + WebSocket) | pipeline-builder | 없음 | **구현완료** |
+| P5 | config.json + style_mapper.py 구현 | pipeline-builder | P3 | **구현완료** |
+| P6 | prompt_generator.py 구현 | pipeline-builder | 없음 | **구현완료** |
+| P7 | model_manager.py 구현 | pipeline-builder | P2, P4 | **구현완료** |
+| P8 | animatediff_base.json + flux_base.json 기본 워크플로우 JSON 작성 | pipeline-builder | P4 | **구현완료** |
+| P9 | pipeline.py F003 메인 로직 구현 | pipeline-builder | P4, P5, P6, P7, P8 | **구현완료** |
+| P10 | runner.py F003 등록 | pipeline-builder | P9 | **구현완료** |
+| P11 | backend model_service + download_service 구현 | api-builder | P2 | **구현완료** |
+| P12 | backend model_assets 라우터 + 스키마 구현 | api-builder | P11 | **구현완료** |
+| P13 | main.py model_assets 라우터 + StaticFiles 등록 | api-builder | P12 | **구현완료** |
+| P14 | F003View.vue 프론트엔드 구현 | web-builder | P3, P12 | **구현완료** |
+| P15 | router/index.js F003 라우트 추가 | web-builder | P14 | **구현완료** |
+| P16 | TaskDetailView.vue F003 미디어 렌더링 추가 | web-builder | P14 | **구현완료** |
+| P17 | storage/results/f003/ 디렉토리 생성 확인 | api-builder | 없음 | **구현완료** |
+| P18 | 전체 통합 검토 및 테스트 | critic | P1~P17 | **구현완료** |
 
 **병렬 실행 가능한 Phase 그룹**:
 - 그룹 A (독립): P1, P2, P3, P4, P6, P17 동시 시작 가능

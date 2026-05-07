@@ -63,6 +63,14 @@ def _build_registry() -> dict:
     except ImportError as e:
         logger.warning(f"F002 파이프라인 로드 실패 (임포트 오류): {e}")
 
+    # F003 — 영상제작
+    try:
+        from pipelines.f003_video_creation.pipeline import F003Pipeline
+        registry["F003"] = F003Pipeline
+        logger.info("파이프라인 등록 완료: F003 (영상제작)")
+    except ImportError as e:
+        logger.warning(f"F003 파이프라인 로드 실패 (임포트 오류): {e}")
+
     return registry
 
 
@@ -236,9 +244,15 @@ def main() -> None:
         if result is None:
             result = {}
 
-        # 최종 상태를 DONE으로 업데이트 (run() 내부에서 이미 했을 수 있으나 보장용)
-        pipeline.update_status(task_id=task_id, status="DONE", result=result)
-        logger.info(f"[task_id={task_id}] 최종 상태 DONE 저장 완료")
+        # F003 등 파이프라인이 run() 내부에서 update_status(DONE)을 직접 호출한 경우 중복 방지
+        # 아직 DONE이 아닌 경우에만 보장용 업데이트 실행
+        import sqlite3
+        from core.config import DB_PATH
+        with sqlite3.connect(DB_PATH) as _chk:
+            row = _chk.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
+        if row and row[0] != "DONE":
+            pipeline.update_status(task_id=task_id, status="DONE", result=result)
+            logger.info(f"[task_id={task_id}] 최종 상태 DONE 저장 완료")
 
     except Exception as e:
         # 어떤 예외도 FAILED + 오류 메시지로 저장

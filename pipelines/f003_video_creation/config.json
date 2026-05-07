@@ -1,0 +1,170 @@
+{
+  "comfyui_url": "http://localhost:8188",
+  "comfyui_manager_url": "http://localhost:8188",
+  "comfyui_path": "C:\\ComfyUI",
+  "output_dir": "C:\\Develop\\Dash\\storage\\results\\f003",
+  "ollama_url": "http://localhost:11434",
+  "default_motion_module": "mm_sd_v15_v2.ckpt",
+  "reboot_poll_interval_sec": 5,
+  "reboot_timeout_sec": 120,
+  "style_mapping": {
+    "anime": {
+      "checkpoint": "anime_art_diffusion_xl.safetensors",
+      "base_model": "SDXL",
+      "style_loras": [
+        {"name": "aesthetic_anime.safetensors", "strength_model": 0.7, "strength_clip": 0.5}
+      ],
+      "prompt_keywords": ["anime style", "anime coloring", "cel shading"]
+    },
+    "realistic": {
+      "checkpoint": "cyberrealisticPony.safetensors",
+      "base_model": "SD1.5",
+      "style_loras": [],
+      "prompt_keywords": ["photorealistic", "hyperrealistic", "RAW photo"]
+    },
+    "fantasy": {
+      "checkpoint": "fantasiaXL.safetensors",
+      "base_model": "SDXL",
+      "style_loras": [
+        {"name": "alpha_fantasy_touch.safetensors", "strength_model": 0.6, "strength_clip": 0.4}
+      ],
+      "prompt_keywords": ["fantasy art", "magical", "ethereal", "painterly"]
+    },
+    "cyberpunk": {
+      "checkpoint": "cyberrealisticPony.safetensors",
+      "base_model": "SD1.5",
+      "style_loras": [
+        {"name": "cyberpunk_anime.safetensors", "strength_model": 0.7, "strength_clip": 0.5}
+      ],
+      "prompt_keywords": ["cyberpunk", "neon lights", "futuristic city"]
+    },
+    "watercolor": {
+      "checkpoint": "landscapeAnimePro.safetensors",
+      "base_model": "SD1.5",
+      "style_loras": [],
+      "prompt_keywords": ["watercolor painting", "soft brushstrokes"]
+    },
+    "3d_render": {
+      "checkpoint": "sdxl_base.safetensors",
+      "base_model": "SDXL",
+      "style_loras": [],
+      "prompt_keywords": ["3D render", "CGI", "unreal engine"]
+    },
+    "pixel_art": {
+      "checkpoint": "pixel_art_diffusion_xl.safetensors",
+      "base_model": "SDXL",
+      "style_loras": [
+        {"name": "pixel_art_anime_screencap.safetensors", "strength_model": 0.8, "strength_clip": 0.6}
+      ],
+      "prompt_keywords": ["pixel art", "8-bit", "retro game"]
+    },
+    "flux": {
+      "checkpoint": "flux1-dev-fp8.safetensors",
+      "base_model": "Flux.1",
+      "style_loras": [],
+      "prompt_keywords": ["highly detailed", "sharp focus", "cinematic lighting"]
+    }
+  },
+  "detail_lora_mapping": {
+    "detail_tweaker": {
+      "filename": "detail_tweaker_sd15.safetensors",
+      "base_models": ["SD1.5"],
+      "default_weight": 1.0
+    },
+    "detail_tweaker_xl": {
+      "filename": "detail_tweaker_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 1.5
+    },
+    "add_more_details": {
+      "filename": "add_more_details.safetensors",
+      "base_models": ["SD1.5"],
+      "default_weight": 0.7
+    },
+    "flux_image_upgrader": {
+      "filename": "flux_image_upgrader.safetensors",
+      "base_models": ["Flux.1", "SDXL", "SD1.5"],
+      "default_weight": 0.7
+    },
+    "detailifier": {
+      "filename": "detailifier.safetensors",
+      "base_models": ["Flux.1", "SD3.5", "SDXL", "SD1.5"],
+      "default_weight": 0.7
+    }
+  },
+  "motion_module_mapping": {
+    "SD1.5": "mm_sd_v15_v2.ckpt",
+    "SDXL": "mm_sdxl_v10_beta.ckpt"
+  },
+  "flux_model": {
+    "diffusion_model": "flux1-dev-fp8.safetensors",
+    "vae": "ae.safetensors",
+    "clip_l": "clip_l.safetensors",
+    "t5xxl": "t5xxl_fp8_e4m3fn.safetensors"
+  },
+  "character_keyword_map": {
+    "western": "western facial features",
+    "asian": "asian facial features",
+    "mixed": "mixed facial features",
+    "long_hair": "long hair",
+    "short_hair": "short hair",
+    "twin_tails": "twin tails",
+    "ponytail": "ponytail",
+    "bob_with_bangs": "bob cut with bangs",
+    "blonde": "blonde hair",
+    "brown": "brown hair",
+    "black": "black hair",
+    "pink": "pink hair",
+    "silver": "silver hair",
+    "gradient": "gradient colored hair",
+    "large_eyes": "large eyes",
+    "sharp_eyes": "sharp eyes",
+    "upturned": "upturned eyes",
+    "downturned": "downturned eyes",
+    "casual": "casual clothes",
+    "fantasy": "fantasy costume",
+    "school_uniform": "school uniform",
+    "sportswear": "sportswear",
+    "dress": "elegant dress",
+    "cyberpunk": "cyberpunk outfit"
+  },
+  "camera_keyword_map": {
+    "front": "looking at viewer, front view",
+    "side": "from side",
+    "from_above": "from above",
+    "from_below": "from below",
+    "dramatic_low": "dramatic low angle",
+    "close_up": "close-up",
+    "upper_body": "upper body",
+    "full_body": "full body",
+    "wide_shot": "wide shot",
+    "bokeh": "depth of field, bokeh",
+    "pan_focus": "pan focus, sharp focus"
+  },
+  "lighting_keyword_map": {
+    "natural_day": "natural daylight, outdoor lighting",
+    "golden_hour": "golden hour, warm sunlight",
+    "night": "night scene, moonlight",
+    "indoor": "indoor lighting, soft light",
+    "dramatic": "dramatic lighting, chiaroscuro",
+    "soft": "soft lighting, diffused light",
+    "backlit": "backlit, rim light",
+    "studio": "studio lighting, professional lighting",
+    "neon": "neon lights, colorful artificial lighting"
+  },
+  "background_keyword_map": {
+    "classroom": "classroom background",
+    "cafe": "cafe background",
+    "bedroom": "bedroom background",
+    "office": "office background",
+    "city_street": "city street background",
+    "nature_park": "nature park background",
+    "beach": "beach background",
+    "mountain_forest": "mountain forest background",
+    "castle": "castle background",
+    "magical_realm": "magical realm background",
+    "otherworldly": "otherworldly landscape",
+    "plain_background": "simple background",
+    "abstract": "abstract background"
+  }
+}

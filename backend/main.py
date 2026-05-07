@@ -22,11 +22,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from core.config import DB_PATH
 from core.database import init_db
 from models.task import row_to_dict
-from routers import chat, features, health, models, schedules, search, tasks
+from routers import chat, features, health, models, model_assets, schedules, search, tasks
 
 
 async def _restore_schedules(app: FastAPI) -> None:
@@ -101,6 +102,12 @@ def create_app() -> FastAPI:
     app.include_router(models.router)
     app.include_router(chat.router)
     app.include_router(search.router)
+    app.include_router(model_assets.router)
+
+    # F003 결과 파일 정적 서빙 (이미지/동영상) — 프로젝트 루트 기준 상대 경로
+    f003_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f003"
+    f003_results_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/results/f003", StaticFiles(directory=str(f003_results_dir)), name="f003_results")
 
     @app.get("/", include_in_schema=False)
     async def root():

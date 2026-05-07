@@ -141,6 +141,16 @@ const isF002Issues = computed(() =>
   task.value?.feature_id === 'F002' && Array.isArray(parsedResult.value?.issues)
 )
 
+// F003 미디어 결과 여부 — feature_id가 F003이고 결과에 file_name이 있을 때
+const isF003Result = computed(() =>
+  task.value?.feature_id === 'F003' && parsedResult.value?.file_name
+)
+
+// F003 결과가 동영상인지 여부 — generation_type으로 판별
+const f003IsVideo = computed(() =>
+  parsedResult.value?.generation_type === 'video'
+)
+
 // ────────────────────────────────────────────────
 // 라이프사이클
 // ────────────────────────────────────────────────
@@ -239,6 +249,32 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+        </template>
+        <!-- F003 미디어 렌더링 — 이미지 또는 동영상 -->
+        <template v-else-if="isF003Result">
+          <!-- 동영상 결과 -->
+          <video
+            v-if="f003IsVideo"
+            :src="`/results/f003/${parsedResult.file_name}`"
+            controls
+            class="result-media"
+          ></video>
+          <!-- 이미지 결과 -->
+          <img
+            v-else
+            :src="`/results/f003/${parsedResult.file_name}`"
+            alt="생성된 이미지"
+            class="result-media"
+          />
+          <!-- 생성 메타 정보 -->
+          <div class="result-meta">
+            <span>생성 유형: {{ parsedResult.generation_type === 'video' ? '동영상' : '이미지' }}</span>
+            <span v-if="parsedResult.art_style"> | 스타일: {{ parsedResult.art_style }}</span>
+            <span v-if="parsedResult.base_model"> | 기반 모델: {{ parsedResult.base_model }}</span>
+            <span v-if="parsedResult.seed"> | 시드: {{ parsedResult.seed }}</span>
+          </div>
+          <!-- 파일 경로 -->
+          <div class="result-file">파일: {{ parsedResult.file_path }}</div>
         </template>
         <!-- 그 외: 들여쓰기 JSON -->
         <pre v-else class="json-block">{{ formatJson(task.result) }}</pre>
@@ -533,5 +569,33 @@ onUnmounted(() => {
 .cancel-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* ── F003 미디어 결과 ── */
+
+/* 생성된 이미지/동영상 — 전체 너비에 맞추되 둥근 모서리 */
+.result-media {
+  max-width: 100%;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* 생성 메타 정보 — 생성 유형, 스타일, 기반 모델, 시드를 한 줄로 나열 */
+.result-meta {
+  font-size: 12px;
+  color: #888;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+/* 파일 경로 — 모노스페이스로 경로 가독성 확보 */
+.result-file {
+  font-size: 11px;
+  color: #bbb;
+  font-family: monospace;
+  word-break: break-all;
 }
 </style>

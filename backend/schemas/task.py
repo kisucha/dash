@@ -40,10 +40,11 @@ class TaskResponse(BaseModel):
 
 
 class TaskListResponse(BaseModel):
-    """GET /api/tasks 목록 응답 스키마."""
+    """GET /api/tasks 목록 응답 스키마 — cursor 기반 페이징."""
 
-    total: int
     items: list[TaskResponse]
+    next_cursor: int | None   # None이면 마지막 페이지
+    has_more: bool
 
 
 # ── Schedule 스키마 ────────────────────────────────────────────

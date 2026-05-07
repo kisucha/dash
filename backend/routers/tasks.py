@@ -27,15 +27,18 @@ async def create_task(
 @router.get("", response_model=TaskListResponse)
 async def list_tasks(
     limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    cursor: int | None = Query(default=None, description="마지막 수신 task id (첫 페이지는 생략)"),
     feature_id: str | None = Query(default=None, description="업무 ID 필터"),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> TaskListResponse:
-    """작업 목록을 최신 순으로 반환한다. feature_id 지정 시 해당 업무만 필터링."""
-    total, items = await task_service.list_tasks(db, limit=limit, offset=offset, feature_id=feature_id)
+    """작업 목록을 최신 순(id DESC)으로 반환한다. cursor 기반 페이징, feature_id 지정 시 해당 업무만 필터링."""
+    items, next_cursor, has_more = await task_service.list_tasks(
+        db, limit=limit, cursor=cursor, feature_id=feature_id
+    )
     return TaskListResponse(
-        total=total,
         items=[TaskResponse.model_validate(item) for item in items],
+        next_cursor=next_cursor,
+        has_more=has_more,
     )
 
 

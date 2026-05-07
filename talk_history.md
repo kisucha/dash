@@ -181,3 +181,77 @@
 
 ### 다음 세션 시작 포인트
 - 구현 시작: PLAN.md의 18개 단계 중 phase 1(커서 기반 페이징)부터 순차 구현 (/order3 예상)
+
+---
+
+## 세션 2026-05-07 (2차) — Phase 1~18 전체 구현 + Critic 검토 완료
+
+### 사용자 지시 요약
+- `/order3 구현해줘` — PLAN.md의 18개 Phase 전체 구현 지시
+- 작업 완료 후 `code_update.md`와 `talk_history.md` 업데이트 요청
+
+### Claude 작업 요약
+
+**1. Cursor 기반 페이징 전환 (P1)**
+- Task 목록 조회: offset → cursor 기반으로 전환
+- `TaskListResponse`: `total` 제거, `next_cursor` + `has_more` 추가
+- SQL: `WHERE id < cursor ORDER BY id DESC LIMIT limit+1` 구조
+
+**2. DB 스키마 추가 (P2)**
+- `model_inventory` 테이블 (파일명, 해시, 모델타입 저장)
+- `model_download_queue` 테이블 (다운로드 상태 추적)
+
+**3. F003 Feature 정의 (P3)**
+- 영상제작 파이프라인 feature 추가
+- 24개 입력 필드 (유형, 아트스타일, 촬영스타일, 배경, 인물 등)
+- "Flux.1 (고품질)" 옵션 추가
+
+**4-13. F003 파이프라인 구현**
+- **ComfyUI 클라이언트**: REST + WebSocket 통신, 취소 시 GPU 즉시 해제
+- **프롬프트 생성**: Ollama 기반 SD/Flux.1 프롬프트 자동 생성
+- **스타일 매핑**: 사용자 선택 → ComfyUI 워크플로우 자동 매핑
+- **모델 관리**: 모델 인벤토리 + HuggingFace 자동 다운로드
+- **메인 파이프라인**: 11단계 실행 흐름 (타입 선택 → 프롬프트 → 이미지 생성 → 영상 변환 → 후처리)
+- **워크플로우**: AnimateDiff(동영상), Flux.1(이미지) 2개 기본 워크플로우 제공
+
+**14-16. F003 프론트엔드**
+- `F003View.vue`: 3단계 다단계 폼 UI (유형→스타일→파라미터)
+- `/features/F003` 라우트 추가
+- `TaskDetailView.vue`: 이미지/동영상 렌더링 블록
+
+**17. Vite 프록시 설정 (Critical 버그 수정)**
+- `/results` 경로 프록시 추가 → F003 결과 이미지/동영상 404 오류 해결
+
+**18. Pipeline Runner 중복 업데이트 제거**
+- run() 완료 후 DB 상태 확인 → DONE이 아닌 경우에만 업데이트
+
+**Critic 검토 → 버그 수정**
+- Critical 5개:
+  1. vite.config.js /results 프록시 누락 → 추가
+  2. model_assets.py 경로 순회 보안 취약점 → os.path.basename 검증
+  3. 절대 경로 하드코딩 → Path 상대 경로로 수정
+  4. runner.py 중복 DONE 업데이트 → 상태 확인 후 조건 실행
+  5. flux_base.json 고아 노드 → 제거
+- Major 7개 & Minor 4개 모두 수정 완료
+
+### 주요 결정사항
+- Cursor 페이징: 동시성 안전 + 무한 스크롤 지원
+- F003 구현:
+  - ComfyUI + AnimateDiff 동시 지원 (동영상)
+  - Flux.1 고품질 이미지 생성
+  - 모델 자동 다운로드 및 캐싱
+  - 사용자 커스터마이징 (프롬프트, 스타일 선택)
+
+### 검증 완료
+- P1: cursor 페이징 동작 확인 ✓
+- P3: F003 feature 조회 (24개 필드 정상) ✓
+- P4-P13: ComfyUI 클라이언트, 모델 관리, 프롬프트 생성 통합 ✓
+- P14-P16: F003View 3단계 폼, TaskDetailView 미디어 렌더링 ✓
+- P17: /results/f003 프록시 (이미지/동영상 접근 가능) ✓
+- P18: runner.py 중복 업데이트 제거 ✓
+- Critic 검토 후 Critical/Major/Minor 16개 버그 모두 수정 ✓
+
+### 다음 세션 시작 포인트
+- F003 실행 테스트: 대시보드에서 F003 기능 실행 후 동영상/이미지 생성 확인
+- ComfyUI 서버 헬스체크 추가 (선택사항)
+- 백그라운드 모델 다운로드 프로세스 최적화 (필요 시)

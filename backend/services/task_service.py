@@ -71,31 +71,50 @@ class TaskService:
         self,
         db: aiosqlite.Connection,
         limit: int = 20,
-        offset: int = 0,
+        cursor: Optional[int] = None,
         feature_id: Optional[str] = None,
-    ) -> tuple[int, list[dict]]:
-        """Task 목록과 전체 건수를 반환한다 (최신 순 정렬).
+    ) -> tuple[list[dict], Optional[int], bool]:
+        """cursor 기반 페이징으로 task 목록 조회. limit+1개 조회로 has_more 판단.
 
+        cursor: 마지막 수신 task id — 이 id보다 작은(더 오래된) 항목을 반환.
         feature_id가 주어지면 해당 업무의 작업만 필터링한다.
+        반환: (items, next_cursor, has_more)
         """
-        if feature_id:
-            cursor = await db.execute(
-                "SELECT COUNT(*) FROM tasks WHERE feature_id = ?", (feature_id,)
+        # limit+1개를 조회해 다음 페이지 존재 여부를 판단
+        fetch_limit = limit + 1
+
+        if cursor is not None and feature_id:
+            db_cursor = await db.execute(
+                "SELECT * FROM tasks WHERE id < ? AND feature_id = ? ORDER BY id DESC LIMIT ?",
+                (cursor, feature_id, fetch_limit),
             )
-            total: int = (await cursor.fetchone())[0]
-            cursor = await db.execute(
-                "SELECT * FROM tasks WHERE feature_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (feature_id, limit, offset),
+        elif cursor is not None:
+            db_cursor = await db.execute(
+                "SELECT * FROM tasks WHERE id < ? ORDER BY id DESC LIMIT ?",
+                (cursor, fetch_limit),
+            )
+        elif feature_id:
+            db_cursor = await db.execute(
+                "SELECT * FROM tasks WHERE feature_id = ? ORDER BY id DESC LIMIT ?",
+                (feature_id, fetch_limit),
             )
         else:
-            cursor = await db.execute("SELECT COUNT(*) FROM tasks")
-            total = (await cursor.fetchone())[0]
-            cursor = await db.execute(
-                "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
+            db_cursor = await db.execute(
+                "SELECT * FROM tasks ORDER BY id DESC LIMIT ?",
+                (fetch_limit,),
             )
-        rows = await cursor.fetchall()
-        return total, [row_to_dict(r) for r in rows]
+
+        rows = await db_cursor.fetchall()
+        items = [row_to_dict(r) for r in rows]
+
+        # limit+1번째 항목이 존재하면 다음 페이지가 있음
+        has_more = len(items) > limit
+        if has_more:
+            items = items[:limit]
+
+        # 다음 페이지 시작 cursor는 현재 페이지 마지막 항목의 id
+        next_cursor: Optional[int] = items[-1]["id"] if has_more else None
+        return items, next_cursor, has_more
 
     async def cancel_task(
         self, db: aiosqlite.Connection, task_id: int
