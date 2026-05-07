@@ -9,53 +9,47 @@
   "reboot_timeout_sec": 120,
   "style_mapping": {
     "anime": {
-      "checkpoint": "anime_art_diffusion_xl.safetensors",
-      "base_model": "SDXL",
+      "checkpoint": "animaOfficial_preview3Base.safetensors",
+      "base_model": "SD1.5",
       "style_loras": [
-        {"name": "aesthetic_anime.safetensors", "strength_model": 0.7, "strength_clip": 0.5}
+        {"name": "Nijijourney_AnimaPreview2_byKonan.safetensors", "strength_model": 0.7, "strength_clip": 0.5}
       ],
       "prompt_keywords": ["anime style", "anime coloring", "cel shading"]
     },
     "realistic": {
-      "checkpoint": "cyberrealisticPony.safetensors",
+      "checkpoint": "animaOfficial_preview3Base.safetensors",
       "base_model": "SD1.5",
       "style_loras": [],
-      "prompt_keywords": ["photorealistic", "hyperrealistic", "RAW photo"]
+      "prompt_keywords": ["photorealistic", "hyperrealistic", "detailed skin"]
     },
     "fantasy": {
-      "checkpoint": "fantasiaXL.safetensors",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
       "base_model": "SDXL",
-      "style_loras": [
-        {"name": "alpha_fantasy_touch.safetensors", "strength_model": 0.6, "strength_clip": 0.4}
-      ],
+      "style_loras": [],
       "prompt_keywords": ["fantasy art", "magical", "ethereal", "painterly"]
     },
     "cyberpunk": {
-      "checkpoint": "cyberrealisticPony.safetensors",
+      "checkpoint": "animaOfficial_preview3Base.safetensors",
       "base_model": "SD1.5",
-      "style_loras": [
-        {"name": "cyberpunk_anime.safetensors", "strength_model": 0.7, "strength_clip": 0.5}
-      ],
+      "style_loras": [],
       "prompt_keywords": ["cyberpunk", "neon lights", "futuristic city"]
     },
     "watercolor": {
-      "checkpoint": "landscapeAnimePro.safetensors",
+      "checkpoint": "animaOfficial_preview3Base.safetensors",
       "base_model": "SD1.5",
       "style_loras": [],
-      "prompt_keywords": ["watercolor painting", "soft brushstrokes"]
+      "prompt_keywords": ["watercolor painting", "soft brushstrokes", "pastel colors"]
     },
     "3d_render": {
-      "checkpoint": "sdxl_base.safetensors",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
       "base_model": "SDXL",
       "style_loras": [],
       "prompt_keywords": ["3D render", "CGI", "unreal engine"]
     },
     "pixel_art": {
-      "checkpoint": "pixel_art_diffusion_xl.safetensors",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
       "base_model": "SDXL",
-      "style_loras": [
-        {"name": "pixel_art_anime_screencap.safetensors", "strength_model": 0.8, "strength_clip": 0.6}
-      ],
+      "style_loras": [],
       "prompt_keywords": ["pixel art", "8-bit", "retro game"]
     },
     "flux": {

@@ -111,7 +111,16 @@ class ComfyUIClient:
         payload = {"prompt": workflow_dict}
         with httpx.Client(timeout=30.0) as client:
             resp = client.post(f"{self.base_url}/prompt", json=payload)
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                # ComfyUI 400 응답에는 node_errors, error 등 상세 정보가 포함됨
+                try:
+                    err_body = resp.json()
+                except Exception:
+                    err_body = resp.text
+                logger.error(f"ComfyUI /prompt 오류 ({resp.status_code}): {err_body}")
+                raise RuntimeError(
+                    f"ComfyUI 워크플로우 제출 실패 ({resp.status_code}): {err_body}"
+                )
             data = resp.json()
             prompt_id = data.get("prompt_id")
             if not prompt_id:

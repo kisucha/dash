@@ -56,7 +56,7 @@
       "steps": 20,
       "cfg": 7.0,
       "sampler_name": "euler",
-      "scheduler": "linear",
+      "scheduler": "karras",
       "denoise": 1.0
     }
   },
