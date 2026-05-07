@@ -63,6 +63,9 @@ def resolve_detail_loras(keys: list[str], base_model: str, config: Optional[dict
             logger.warning(f"알 수 없는 디테일 LoRA 키: {key}")
             continue
         lora_info = detail_map[key]
+        if not lora_info.get("installed", True):
+            logger.info(f"디테일 LoRA '{key}' - 미설치 (config.json installed=false), 건너뜀")
+            continue
         if base_model not in lora_info["base_models"]:
             logger.info(f"디테일 LoRA '{key}' - 기반 모델 {base_model} 미지원, 건너뜀")
             continue

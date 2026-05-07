@@ -400,7 +400,10 @@ const loraLabels = {
       <!-- 카테고리 7: 디테일 향상 LoRA — 현재 기반 모델과 호환되는 항목만 활성화 -->
       <div class="cat-section">
         <h3 class="cat-title">디테일 향상 LoRA</h3>
-        <p class="cat-hint">현재 기반 모델({{ currentBaseModel }})과 호환되는 LoRA만 활성화됩니다.</p>
+        <p class="cat-hint">
+          현재 기반 모델({{ currentBaseModel }})과 호환되는 LoRA만 활성화됩니다.
+          <span class="install-hint">선택해도 ComfyUI에 미설치된 LoRA는 자동으로 건너뜁니다.</span>
+        </p>
         <div class="lora-checkboxes">
           <label
             v-for="key in ['detail_tweaker', 'detail_tweaker_xl', 'add_more_details', 'flux_image_upgrader', 'detailifier']"
@@ -707,6 +710,13 @@ const loraLabels = {
   font-size: 12px;
   color: #888;
   margin: 0 0 8px;
+}
+
+.install-hint {
+  display: block;
+  margin-top: 3px;
+  color: #b45309;
+  font-size: 11px;
 }
 
 .base-model-hint {

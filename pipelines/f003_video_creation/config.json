@@ -63,27 +63,32 @@
     "detail_tweaker": {
       "filename": "detail_tweaker_sd15.safetensors",
       "base_models": ["SD1.5"],
-      "default_weight": 1.0
+      "default_weight": 1.0,
+      "installed": false
     },
     "detail_tweaker_xl": {
       "filename": "detail_tweaker_xl.safetensors",
       "base_models": ["SDXL"],
-      "default_weight": 1.5
+      "default_weight": 1.5,
+      "installed": false
     },
     "add_more_details": {
       "filename": "add_more_details.safetensors",
       "base_models": ["SD1.5"],
-      "default_weight": 0.7
+      "default_weight": 0.7,
+      "installed": false
     },
     "flux_image_upgrader": {
       "filename": "flux_image_upgrader.safetensors",
       "base_models": ["Flux.1", "SDXL", "SD1.5"],
-      "default_weight": 0.7
+      "default_weight": 0.7,
+      "installed": false
     },
     "detailifier": {
       "filename": "detailifier.safetensors",
       "base_models": ["Flux.1", "SD3.5", "SDXL", "SD1.5"],
-      "default_weight": 0.7
+      "default_weight": 0.7,
+      "installed": false
     }
   },
   "motion_module_mapping": {
