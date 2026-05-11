@@ -1,7 +1,7 @@
 {
   "comfyui_url": "http://localhost:8188",
   "comfyui_manager_url": "http://localhost:8188",
-  "comfyui_path": "C:\\ComfyUI",
+  "comfyui_path": "C:\\ComfyUI\\ComfyUI",
   "output_dir": "C:\\Develop\\Dash\\storage\\results\\f003",
   "ollama_url": "http://localhost:11434",
   "default_motion_module": "mm_sd_v15_v2.ckpt",
@@ -9,16 +9,14 @@
   "reboot_timeout_sec": 120,
   "style_mapping": {
     "anime": {
-      "checkpoint": "animaOfficial_preview3Base.safetensors",
-      "base_model": "SD1.5",
-      "style_loras": [
-        {"name": "Nijijourney_AnimaPreview2_byKonan.safetensors", "strength_model": 0.7, "strength_clip": 0.5}
-      ],
-      "prompt_keywords": ["anime style", "anime coloring", "cel shading"]
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "base_model": "SDXL",
+      "style_loras": [],
+      "prompt_keywords": ["anime style", "anime coloring", "cel shading", "2D illustration"]
     },
     "realistic": {
-      "checkpoint": "animaOfficial_preview3Base.safetensors",
-      "base_model": "SD1.5",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "base_model": "SDXL",
       "style_loras": [],
       "prompt_keywords": ["photorealistic", "hyperrealistic", "detailed skin"]
     },
@@ -29,14 +27,14 @@
       "prompt_keywords": ["fantasy art", "magical", "ethereal", "painterly"]
     },
     "cyberpunk": {
-      "checkpoint": "animaOfficial_preview3Base.safetensors",
-      "base_model": "SD1.5",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "base_model": "SDXL",
       "style_loras": [],
       "prompt_keywords": ["cyberpunk", "neon lights", "futuristic city"]
     },
     "watercolor": {
-      "checkpoint": "animaOfficial_preview3Base.safetensors",
-      "base_model": "SD1.5",
+      "checkpoint": "sd_xl_base_1.0.safetensors",
+      "base_model": "SDXL",
       "style_loras": [],
       "prompt_keywords": ["watercolor painting", "soft brushstrokes", "pastel colors"]
     },
@@ -53,42 +51,167 @@
       "prompt_keywords": ["pixel art", "8-bit", "retro game"]
     },
     "flux": {
-      "checkpoint": "flux1-dev-fp8.safetensors",
+      "checkpoint": "flux1-schnell.safetensors",
       "base_model": "Flux.1",
       "style_loras": [],
       "prompt_keywords": ["highly detailed", "sharp focus", "cinematic lighting"]
     }
   },
   "detail_lora_mapping": {
-    "detail_tweaker": {
-      "filename": "detail_tweaker_sd15.safetensors",
-      "base_models": ["SD1.5"],
-      "default_weight": 1.0,
-      "installed": false
-    },
     "detail_tweaker_xl": {
+      "display_name": "Detail Tweaker XL",
+      "category": "enhancement",
+      "description": "SDXL 텍스처와 세부 묘사를 강화하는 범용 디테일 LoRA",
       "filename": "detail_tweaker_xl.safetensors",
       "base_models": ["SDXL"],
       "default_weight": 1.5,
-      "installed": false
-    },
-    "add_more_details": {
-      "filename": "add_more_details.safetensors",
-      "base_models": ["SD1.5"],
-      "default_weight": 0.7,
-      "installed": false
-    },
-    "flux_image_upgrader": {
-      "filename": "flux_image_upgrader.safetensors",
-      "base_models": ["Flux.1", "SDXL", "SD1.5"],
-      "default_weight": 0.7,
-      "installed": false
+      "civitai_version_id": 274039,
+      "hf_repo_id": null,
+      "trigger_words": []
     },
     "detailifier": {
+      "display_name": "Detailifier v2.5",
+      "category": "enhancement",
+      "description": "다중 베이스 모델 지원 - 전반적인 디테일과 질감 향상",
       "filename": "detailifier.safetensors",
       "base_models": ["Flux.1", "SD3.5", "SDXL", "SD1.5"],
       "default_weight": 0.7,
-      "installed": false
+      "civitai_version_id": 1031573,
+      "hf_repo_id": null,
+      "trigger_words": ["detailerlora"],
+      "trigger_words_flux": ["detailifier"]
+    },
+    "detail_tweaker": {
+      "display_name": "Detail Tweaker SD1.5",
+      "category": "enhancement",
+      "description": "SD1.5 전용 디테일 강화 LoRA",
+      "filename": "detail_tweaker_sd15.safetensors",
+      "base_models": ["SD1.5"],
+      "default_weight": 1.0,
+      "civitai_version_id": 135867,
+      "hf_repo_id": null,
+      "trigger_words": []
+    },
+    "add_more_details": {
+      "display_name": "Add More Details",
+      "category": "enhancement",
+      "description": "SD1.5 이미지에 세부 디테일 추가",
+      "filename": "add_more_details.safetensors",
+      "base_models": ["SD1.5"],
+      "default_weight": 0.7,
+      "civitai_version_id": 87153,
+      "hf_repo_id": null,
+      "trigger_words": []
+    },
+    "flux_image_upgrader": {
+      "display_name": "Flux Image Upgrader",
+      "category": "enhancement",
+      "description": "Flux/SDXL/SD1.5 범용 이미지 업그레이더",
+      "filename": "flux_image_upgrader.safetensors",
+      "base_models": ["Flux.1", "SDXL", "SD1.5"],
+      "default_weight": 0.7,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": ["aidmaimageupgrader"]
+    },
+    "eyelash_hair_detail": {
+      "display_name": "Eyelash & Hair Detail XL",
+      "category": "character",
+      "description": "속눈썹과 헤어 디테일을 강화하는 SDXL LoRA",
+      "filename": "eyelash_hair_detail_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.7,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": []
+    },
+    "perfect_eyes_xl": {
+      "display_name": "Perfect Eyes XL",
+      "category": "character",
+      "description": "눈을 더욱 선명하고 아름답게 표현하는 SDXL LoRA",
+      "filename": "perfect_eyes_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.6,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": []
+    },
+    "skin_detail_xl": {
+      "display_name": "Skin Detail XL",
+      "category": "character",
+      "description": "피부 질감과 광택을 현실적으로 표현하는 SDXL LoRA",
+      "filename": "skin_detail_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.7,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": []
+    },
+    "anime_style_xl": {
+      "display_name": "Anime Art Style XL",
+      "category": "style",
+      "description": "SDXL 기반 일본 애니메이션 스타일 LoRA",
+      "filename": "anime_style_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.8,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": ["anime style"]
+    },
+    "oil_painting_xl": {
+      "display_name": "Oil Painting XL",
+      "category": "style",
+      "description": "유화 느낌의 아트 스타일 LoRA",
+      "filename": "oil_painting_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.8,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": ["oil painting"]
+    },
+    "pencil_sketch_xl": {
+      "display_name": "Pencil Sketch XL",
+      "category": "style",
+      "description": "연필 스케치 스타일 LoRA",
+      "filename": "pencil_sketch_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.8,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": ["pencil sketch"]
+    },
+    "nature_background_xl": {
+      "display_name": "Nature Background XL",
+      "category": "background",
+      "description": "자연 배경을 더욱 풍성하게 표현하는 SDXL LoRA",
+      "filename": "nature_background_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.7,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": []
+    },
+    "cityscape_xl": {
+      "display_name": "Cityscape Background XL",
+      "category": "background",
+      "description": "도시 경관 배경을 세밀하게 표현하는 SDXL LoRA",
+      "filename": "cityscape_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.7,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": []
+    },
+    "interior_scene_xl": {
+      "display_name": "Interior Scene XL",
+      "category": "background",
+      "description": "실내 공간 배경을 사실적으로 표현하는 SDXL LoRA",
+      "filename": "interior_scene_xl.safetensors",
+      "base_models": ["SDXL"],
+      "default_weight": 0.7,
+      "civitai_version_id": null,
+      "hf_repo_id": null,
+      "trigger_words": []
     }
   },
   "motion_module_mapping": {
@@ -96,7 +219,7 @@
     "SDXL": "mm_sdxl_v10_beta.ckpt"
   },
   "flux_model": {
-    "diffusion_model": "flux1-dev-fp8.safetensors",
+    "diffusion_model": "flux1-schnell.safetensors",
     "vae": "ae.safetensors",
     "clip_l": "clip_l.safetensors",
     "t5xxl": "t5xxl_fp8_e4m3fn.safetensors"

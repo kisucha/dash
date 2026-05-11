@@ -56,11 +56,36 @@ async def _restore_schedules(app: FastAPI) -> None:
                 )
 
 
+async def _cleanup_stale_running_tasks() -> None:
+    """서버 시작 시 이전 프로세스가 비정상 종료되어 RUNNING에 묶인 태스크를 FAILED로 정리한다."""
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cursor = await conn.execute(
+            "SELECT COUNT(*) FROM tasks WHERE status = 'RUNNING'"
+        )
+        row = await cursor.fetchone()
+        count = row[0] if row else 0
+        if count:
+            await conn.execute(
+                """
+                UPDATE tasks
+                SET status = 'FAILED',
+                    error_message = '서버 재시작으로 인해 중단된 작업',
+                    finished_at = CURRENT_TIMESTAMP
+                WHERE status = 'RUNNING'
+                """
+            )
+            await conn.commit()
+            print(f"[App] 미완료 RUNNING 태스크 {count}건 → FAILED 처리 완료")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """앱 생명주기 관리 — 시작 시 DB/스케줄러 초기화, 종료 시 스케줄러 정지."""
     await init_db()
     print("[App] DB 초기화 완료")
+
+    # 이전 실행에서 비정상 종료된 RUNNING 태스크 정리
+    await _cleanup_stale_running_tasks()
 
     scheduler = AsyncIOScheduler()
     scheduler.start()

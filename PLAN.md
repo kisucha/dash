@@ -865,3 +865,94 @@ SD 1.5 LoRA는 SDXL/Flux.1 에서 사용 불가. `style_mapper.resolve_detail_lo
 ---
 
 *문서 완성도: 97% — 구현에 필요한 모든 파일 경로, 코드 스니펫, 설계 상세, 순서, 트레이드오프가 포함됨.*
+
+---
+
+## F003-V2: 모델 선택 UI + LoRA 강도 슬라이더
+
+| 필드 | 내용 |
+|------|------|
+| 문서명 | F003 모델 선택 & LoRA 강도 구현 계획 |
+| 버전 | V2 |
+| 날짜 | 2026-05-08 |
+| 작성자 | Claude (kisuc 승인) |
+| 문서 유형 | 추가 기능 구현 계획 |
+| 모델 | claude-sonnet-4-6 |
+
+### 요구사항
+
+| 번호 | 요구사항 | 영향 범위 |
+|------|---------|----------|
+| R1 | ComfyUI 설치 Checkpoint/VAE/CLIP 목록을 UI 드롭다운으로 표시 및 선택 | 백엔드 + 프론트엔드 |
+| R2 | 선택한 커스텀 모델이 실제 파이프라인 실행에 반영 | pipeline.py + style_mapper.py |
+| R3 | LoRA 개별 강도 슬라이더 0.0~2.0 | 프론트엔드 + 백엔드 인터페이스 |
+
+### 구현 순서 (의존 관계 기준)
+
+```
+Step 1 → comfyui_client.py: get_available_vaes(), get_available_clips() 추가
+Step 2 → features.py: GET /api/features/f003/models 엔드포인트 추가 (Step1 의존)
+Step 3 → api/index.js: getF003Models() 추가 (Step2 의존)
+Step 4 → style_mapper.py: custom_checkpoint/vae 반영, LoRA strength 객체 지원
+Step 5 → pipeline.py: params 전달 및 detail_loras JSON 파싱
+Step 6 → F003View.vue: 모델 드롭다운 + LoRA 슬라이더 (Step3,4,5 의존)
+```
+
+### 핵심 설계: LoRA 강도 흐름 변경
+
+```
+[기존]
+selectedDetailLoras = ['key1', 'key2']
+→ detail_loras: 'key1,key2'
+→ resolve_detail_loras(keys) → config.json default_weight 고정 사용
+
+[변경]
+selectedDetailLoras = [{key:'k1', strength:1.2}, {key:'k2', strength:0.8}]
+→ detail_loras: '[{"key":"k1","strength":1.2},{"key":"k2","strength":0.8}]'
+→ _parse_detail_loras() → resolve_detail_loras(items) → 사용자 strength 사용
+```
+
+### 핵심 설계: VAE 노드 동적 삽입
+
+현재 SD 워크플로우에서 VAEDecode(노드6)는 체크포인트 내장 VAE를 사용한다.
+custom_vae 지정 시 VAELoader 노드를 동적으로 삽입하고 VAEDecode의 vae 입력을 교체한다.
+
+```
+체크포인트 노드1 → VAEDecode 노드6 (기본: ["1", 2])
+                ↓ custom_vae 적용 시
+VAELoader 노드NEW → VAEDecode 노드6 (["NEW", 0])
+```
+
+### CLIP 선택 제약 (V2)
+
+SD/SDXL에서 CLIP은 CheckpointLoaderSimple 내장 출력이므로 외부 CLIPLoader 삽입이
+복잡하다. V2에서는 드롭다운을 **정보 표시 전용(disabled)**으로 구현하고 실제 파이프라인에
+반영하지 않는다. UI에 힌트 텍스트로 명시한다.
+
+### 라우트 등록 순서 (features.py)
+
+```
+/api/features/f003/models         ← 먼저 (신규)
+/api/features/f003/loras          ← 두 번째
+/api/features/f003/loras/predownload  ← 세 번째
+/api/features/{feature_id}        ← 마지막
+```
+
+### 구현 체크리스트
+
+- [ ] Step 1: comfyui_client.py — get_available_vaes(), get_available_clips() 추가
+- [ ] Step 2: features.py — GET /api/features/f003/models 엔드포인트 추가
+- [ ] Step 3: api/index.js — getF003Models() 추가
+- [ ] Step 4-A: style_mapper.py — _parse_detail_loras() 헬퍼 추가
+- [ ] Step 4-B: style_mapper.py — resolve_detail_loras() items 파라미터로 변경
+- [ ] Step 4-C: style_mapper.py — _insert_vae_node() 헬퍼 추가
+- [ ] Step 4-D: style_mapper.py — build_workflow() custom_checkpoint/VAE 처리
+- [ ] Step 5-A: pipeline.py — _collect_missing_loras() detail_loras 파싱 교체
+- [ ] Step 5-B: pipeline.py — trigger word 수집 파싱 교체
+- [ ] Step 5-C: pipeline.py — custom_checkpoint 우선 검증
+- [ ] Step 5-D: pipeline.py — custom_vae 설치 여부 검증 추가
+- [ ] Step 6-A: F003View.vue — import/ref/함수 추가
+- [ ] Step 6-B: F003View.vue — template 모델 설정 섹션 추가
+- [ ] Step 6-C: F003View.vue — LoRA 슬라이더 추가
+- [ ] Step 6-D: F003View.vue — startGeneration() params 수정
+- [ ] Step 6-E: F003View.vue — CSS 추가

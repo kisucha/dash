@@ -37,6 +37,24 @@
 
 ---
 
+## [2026-05-07] F003 LoRA 트리거 워드 자동 주입 + TaskDetailView 프롬프트 표시
+
+- 변경 파일:
+  - `pipelines/f003_video_creation/config.json`
+  - `pipelines/f003_video_creation/style_mapper.py`
+  - `pipelines/f003_video_creation/pipeline.py`
+  - `frontend/src/views/TaskDetailView.vue`
+- 변경 내용:
+  - config.json: style_loras 항목에 `trigger_words` 키 추가 (nijijourney), detail_lora_mapping 5개 항목에 `trigger_words` 및 `trigger_words_flux` 키 추가
+  - style_mapper.py: `collect_trigger_words()` 함수 추가 -- 활성화된 LoRA의 트리거 워드 수집, Flux.1은 trigger_words_flux 우선 사용, available_loras 기준 필터링
+  - pipeline.py: [5.5] 단계 추가 -- 프롬프트 생성 후 트리거 워드를 포지티브 프롬프트 앞에 주입, result에 `prompt_negative` 필드 추가
+  - TaskDetailView.vue: F003 결과 표시에 포지티브/네거티브 프롬프트 박스 추가, 관련 CSS 추가
+- 변경 이유:
+  1. 트리거 워드 미주입 시 LoRA가 활성화되지 않아 품질 저하 발생
+  2. 실제 생성에 사용된 프롬프트를 대시보드에서 확인할 수 없어 디버깅 불편
+
+---
+
 ## [2026-05-05] 3대 버그 수정 — RouterView 재마운트, Ollama 상태 덮어쓰기, 포커스 전달
 
 - 변경 내용:
@@ -447,3 +465,120 @@
   - P18: 중복 업데이트 제거 ✓
 
 - 담당 에이전트: pipeline-builder, api-builder, web-builder, critic
+
+---
+
+## [2026-05-07 현재] F003 디테일 LoRA 자동 다운로드 기능 추가
+
+- 변경 내용:
+  - `pipelines/f003_video_creation/pipeline.py` — `_collect_missing_loras()` 모듈 레벨 헬퍼 함수 추가
+    - 스타일 LoRA: ComfyUI 미설치 시 경고 로그만 출력 (config에 다운로드 소스 없음)
+    - 디테일 LoRA: ComfyUI 미설치 + civitai_version_id 또는 hf_repo_id 설정된 경우 → 자동 다운로드 대상 목록 반환
+    - 반환 형식: `[{"filename": str, "model_type": "lora", "source": str, "source_id": str}, ...]`
+  - pipeline.py step [4.5]: `_collect_missing_loras()` 호출 → ComfyUI 가용 LoRA 조회 → 누락 LoRA 자동 다운로드 → 목록 갱신 후 워크플로우 빌드
+
+- 변경 이유:
+  - pipeline.py에 `_collect_missing_loras()` 호출이 있었으나 함수 정의가 누락되어 NameError 발생 가능 상태
+  - 디테일 LoRA의 자동 다운로드 기능 완결
+
+- 영향 범위:
+  - pipelines/f003_video_creation/pipeline.py (함수 추가 + step [4.5] 통합)
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-08] F003 ComfyUI 설치 모델 직접 선택 + LoRA 개별 강도 조정 기능 추가
+
+- 변경 파일:
+  - `backend/services/comfyui_client.py`
+  - `backend/routers/features.py`
+  - `pipelines/f003_video_creation/style_mapper.py`
+  - `pipelines/f003_video_creation/pipeline.py`
+  - `frontend/src/api/index.js`
+  - `frontend/src/views/F003View.vue`
+
+- 변경 내용:
+
+### 1. ComfyUI 설치 모델 조회 (backend/services/comfyui_client.py)
+- `get_available_vaes()` 메서드 추가 — CLIPLoader 노드의 VAE 파일 목록 조회
+- `get_available_clips()` 메서드 추가 — CLIPLoader 노드의 CLIP 파일 목록 조회
+
+### 2. F003 Feature API 확장 (backend/routers/features.py)
+- `GET /api/features/f003/models` 엔드포인트 추가
+  - 응답: `{ checkpoints, vaes, loras, clips }` 한 번에 반환
+  - 라우트 순서: /f003/models → /f003/loras → /f003/loras/predownload → /{feature_id}
+
+### 3. 스타일 매핑 및 LoRA 강도 지원 (pipelines/f003_video_creation/style_mapper.py)
+- `_parse_detail_loras()` 헬퍼 추가
+  - 쉼표 문자열 "lora1, lora2" ↔ JSON 배열 형식 `[{key, strength}, ...]` 양방향 지원
+  - 하위 호환성 유지
+- `_insert_vae_node()` 헬퍼 추가
+  - 워크플로우에 VAELoader 노드 동적 삽입
+  - 기존 VAELoader 제거 후 신규 삽입 (중복 방지)
+- `resolve_detail_loras()` 시그니처 변경
+  - `keys: list[str]` → `items: list` (str/dict 혼용 지원)
+  - 반환: `[{key, filename, strength}, ...]` 배열
+- `build_workflow()` 수정
+  - custom_checkpoint 파라미터 적용 (CheckpointLoaderSimple 교체)
+  - custom_vae 파라미터 적용 (VAELoader 동적 삽입)
+  - 5개 워크플로우 경로 모두에 VAE 교체 로직 추가
+
+### 4. 파이프라인 LoRA/모델 검증 (pipelines/f003_video_creation/pipeline.py)
+- `_collect_missing_loras()` detail_loras 파싱을 `_parse_detail_loras()`로 교체
+- 트리거 워드 수집 파싱도 동일하게 교체
+- custom_checkpoint 우선 검증 로직 추가 (step [2.5])
+- custom_vae 사전 검증 블록 추가 (워크플로우 제출 전, step [4.2])
+  - 설치 안 됨 시 조기 실패 + descriptive error
+
+### 5. API 함수 추가 (frontend/src/api/index.js)
+- `getF003Models()` 함수 추가
+  - `GET /api/features/f003/models` 호출
+  - 반환: `{ checkpoints, vaes, loras, clips }`
+
+### 6. F003View 커스텀 모델 + LoRA 강도 UI (frontend/src/views/F003View.vue)
+- 새 ref 추가:
+  - `customCheckpoint`, `customVae`, `customClip` (커스텀 모델 선택)
+  - `availableCheckpoints`, `availableVaes`, `availableClips` (드롭다운 옵션)
+  - `selectedDetailLoras` 형식 변경: `string[]` → `{key, strength}[]` 객체 배열
+  - `modelsLoading` (모델 로딩 상태)
+
+- `loadF003Models()` 함수 추가
+  - onMounted에서 자동 호출
+  - 드롭다운 옵션 채우기
+
+- LoRA 헬퍼 함수 추가:
+  - `isLoraSelected(key)` — 선택 여부
+  - `getLoraStrength(key)` — 현재 강도 (기본 1.0)
+  - `toggleLora(key)` — 선택/해제
+  - `setLoraStrength(key, strength)` — 강도 값 설정 (0.0~2.0)
+
+- 폼 변경사항:
+  - Step 2 상단: 모델 설정 섹션 추가
+    - "Custom Checkpoint" 드롭다운 (가능하면 별도 업로드 지원 고려)
+    - "Custom VAE" 드롭다운
+    - "Custom CLIP" 드롭다운 (표시 전용, 현재 V2는 내장 — V3에서 노출 예정)
+  - LoRA 패널: 개별 강도 슬라이더 추가
+    - 선택된 LoRA 항목 수정 후 강도 슬라이더 표시 (0.0~2.0, step 0.1)
+    - label: "LoRA 강도: {name}"
+  - Step 3 요약 카드:
+    - 커스텀 모델 정보 표시 (선택된 경우)
+    - LoRA 목록에 강도 정보 추가 표시 (예: "lora_name (강도: 0.8)")
+
+- 요청 바디 변경 (startGeneration):
+  - `detail_loras`: JSON.stringify() 형식
+    - `[{key, strength}, ...]` 또는 기존 string[] 양쪽 지원
+  - `custom_checkpoint`: 선택 시만 포함
+  - `custom_vae`: 선택 시만 포함
+  - custom_clip은 (현재 V2) 제외
+
+- 변경 이유:
+  1. 사용자가 ComfyUI 설치 모델을 직접 선택해서 프롬프트 생성 품질 제어 원함
+  2. LoRA별 강도를 UI에서 개별 조정 가능하게 해 스타일 미세 조정 요청
+  3. VAE/Checkpoint 교체로 색감/디테일 품질 향상 기대
+
+- 영향 범위:
+  - Backend: comfyui_client.py (+2 메서드), features.py (+1 엔드포인트), style_mapper.py (+3 헬퍼+1 수정), pipeline.py (+2 검증 블록)
+  - Frontend: api/index.js (+1 함수), F003View.vue (폼 구조 확대, LoRA 강도 슬라이더 추가)
+
+- 담당 에이전트: api-builder, pipeline-builder, web-builder

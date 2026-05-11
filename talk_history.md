@@ -255,3 +255,96 @@
 - F003 실행 테스트: 대시보드에서 F003 기능 실행 후 동영상/이미지 생성 확인
 - ComfyUI 서버 헬스체크 추가 (선택사항)
 - 백그라운드 모델 다운로드 프로세스 최적화 (필요 시)
+
+---
+
+## 세션 2026-05-07 (3차) — F003 디테일 LoRA 자동 다운로드 기능 추가
+
+### 사용자 지시 요약
+- `code_update.md`와 `talk_history.md`에 기록 추가 요청:
+  - F003 pipeline.py에 `_collect_missing_loras()` 함수 추가 사항 기록
+  - 디테일 LoRA 자동 다운로드 기능 완결 관련 내용 기록
+
+### Claude 작업 요약
+- **code_update.md 업데이트**:
+  - `[2026-05-07 현재] F003 디테일 LoRA 자동 다운로드 기능 추가` 섹션 신규 추가
+  - 변경 파일: pipelines/f003_video_creation/pipeline.py
+  - _collect_missing_loras() 함수 추가로 NameError 버그 수정
+  - step [4.5]에서 ComfyUI 가용 LoRA 조회 → 누락 LoRA 자동 다운로드 → 목록 갱신 후 워크플로우 빌드
+
+- **talk_history.md 업데이트**:
+  - 세션 2026-05-07 (3차) 섹션 신규 추가
+  - 사용자 지시 요약 및 작업 내용 기록
+
+### 주요 사항
+- 디테일 LoRA 자동 다운로드는 다음 조건에서만 실행:
+  1. ComfyUI 미설치 상태 (installed = false)
+  2. civitai_version_id 또는 hf_repo_id 설정됨
+- 스타일 LoRA는 config에 다운로드 소스 없으므로 경고 로그만 출력
+
+### 다음 세션 시작 포인트
+- F003 파이프라인 실제 동작 테스트 (ComfyUI 미설치 상태에서 디테일 LoRA 자동 다운로드 확인)
+- 추가 파이프라인 개발 또는 기존 기능 완성도 향상
+
+---
+
+## 세션 2026-05-08 — F003 ComfyUI 설치 모델 직접 선택 + LoRA 개별 강도 조정
+
+### 사용자 지시 요약
+- F003에서 ComfyUI 설치 모델(Checkpoint/VAE/CLIP)을 드롭다운으로 직접 선택하는 기능 추가 요청
+- LoRA별 강도를 슬라이더로 개별 조정할 수 있도록 수정 요청
+- 구현 완료 후 code_update.md와 talk_history.md 업데이트 요청
+
+### Claude 작업 요약
+
+**1. ComfyUI 설치 모델 조회 기능**
+- `backend/services/comfyui_client.py`:
+  - `get_available_vaes()` 메서드 추가 (VAELoader 노드의 VAE 파일 목록)
+  - `get_available_clips()` 메서드 추가 (CLIPLoader 노드의 CLIP 파일 목록)
+
+**2. API 엔드포인트 확장**
+- `backend/routers/features.py`:
+  - `GET /api/features/f003/models` 신규 엔드포인트
+  - 응답: checkpoints, vaes, loras, clips 한 번에 반환
+  - 라우트 순서 정의 (models → loras → loras/predownload → /{feature_id})
+
+**3. 스타일 매핑 + LoRA 강도 지원**
+- `pipelines/f003_video_creation/style_mapper.py`:
+  - `_parse_detail_loras()` 헬퍼: 쉼표 문자열 ↔ JSON 배열 양방향 파싱
+  - `_insert_vae_node()` 헬퍼: VAELoader 노드 동적 삽입 (중복 제거)
+  - `resolve_detail_loras()`: keys: list[str] → items: list (str/dict 혼용)
+  - `build_workflow()`: custom_checkpoint/custom_vae 파라미터 적용, 5개 워크플로우 경로 모두에 VAE 로직
+
+**4. 파이프라인 검증 강화**
+- `pipelines/f003_video_creation/pipeline.py`:
+  - custom_checkpoint 우선 검증 (step [2.5])
+  - custom_vae 사전 검증 (step [4.2], 미설치 시 조기 실패)
+  - detail_loras 파싱을 _parse_detail_loras()로 통일
+
+**5. 프론트엔드 UI 확장**
+- `frontend/src/api/index.js`:
+  - `getF003Models()` 함수 추가
+
+- `frontend/src/views/F003View.vue`:
+  - 새 ref: customCheckpoint, customVae, customClip, availableCheckpoints, availableVaes, availableClips, modelsLoading
+  - `loadF003Models()` 함수 추가 (onMounted 호출)
+  - LoRA 헬퍼 함수: isLoraSelected, getLoraStrength, toggleLora, setLoraStrength
+  - selectedDetailLoras 형식 변경: string[] → {key, strength}[] 객체 배열
+  - Step 2 상단: 모델 설정 섹션 (Checkpoint/VAE/CLIP 드롭다운)
+  - LoRA 패널: 개별 강도 슬라이더 추가 (0.0~2.0, step 0.1)
+  - Step 3 요약: 커스텀 모델 정보 + LoRA 강도 표시
+  - startGeneration에서 detail_loras: JSON.stringify(), custom_checkpoint/custom_vae 조건부 전송
+
+### 주요 결정사항
+- ComfyUI 설치 모델: 드롭다운 선택 (수동 업로드는 V2에서 미지원, V3 고려)
+- LoRA 강도: 0.0~2.0 범위, step 0.1 (UI에서 미세 조정 가능)
+- CLIP: 현재 SD/SDXL 내장 구조상 V2에서 정보 표시 전용 (선택 기능 없음)
+
+### 다음 세션 시작 포인트
+- F003 실행 테스트: 드롭다운에서 모델 선택 후 생성 동작 확인
+- 커스텀 모델 선택 시 프롬프트/스타일 변화 검증
+- LoRA 강도 조정이 실제 이미지 품질에 영향 확인
+
+<!-- session-end: 2026-05-11 21:01:34 -->
+
+<!-- session-end: 2026-05-11 21:02:31 -->

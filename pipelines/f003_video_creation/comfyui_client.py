@@ -96,6 +96,81 @@ class ComfyUIClient:
             logger.error(f"LoRA 목록 조회 실패: {e}")
             return []
 
+    def get_available_vaes(self) -> list:
+        """설치된 VAE 모델 목록 반환.
+
+        ComfyUI VAELoader 노드의 vae_name 입력에서 목록 추출.
+
+        Returns:
+            VAE 파일명 문자열 리스트
+        """
+        try:
+            info = self.get_object_info()
+            loader_info = info.get("VAELoader", {})
+            inputs = loader_info.get("input", {}).get("required", {})
+            vae_info = inputs.get("vae_name", [])
+            if vae_info and isinstance(vae_info[0], list):
+                return vae_info[0]
+            return []
+        except Exception as e:
+            logger.error(f"VAE 목록 조회 실패: {e}")
+            return []
+
+    def get_available_clips(self) -> list:
+        """설치된 CLIP 모델 목록 반환.
+
+        ComfyUI CLIPLoader 노드의 clip_name 입력에서 목록 추출.
+        SD/SDXL에서는 CheckpointLoaderSimple에 내장되어 목록이 비어있을 수 있음.
+
+        Returns:
+            CLIP 파일명 문자열 리스트
+        """
+        try:
+            info = self.get_object_info()
+            loader_info = info.get("CLIPLoader", {})
+            inputs = loader_info.get("input", {}).get("required", {})
+            clip_info = inputs.get("clip_name", [])
+            if clip_info and isinstance(clip_info[0], list):
+                return clip_info[0]
+            return []
+        except Exception as e:
+            logger.error(f"CLIP 목록 조회 실패: {e}")
+            return []
+
+    def get_all_model_lists(self) -> dict:
+        """/object_info 단일 호출로 체크포인트·LoRA·VAE·CLIP 목록을 한꺼번에 반환한다.
+
+        개별 메서드를 4번 호출하면 /object_info 요청이 4회 발생하므로
+        모든 목록이 필요할 때는 이 메서드를 사용한다.
+
+        Returns:
+            {
+                "checkpoints": [...],
+                "loras": [...],
+                "vaes": [...],
+                "clips": [...],
+            }
+        """
+        try:
+            info = self.get_object_info()
+
+            def _extract(node: str, field: str) -> list:
+                # node 타입의 field 입력에서 선택 목록을 추출하는 내부 헬퍼
+                node_info = info.get(node, {})
+                inputs = node_info.get("input", {}).get("required", {})
+                values = inputs.get(field, [])
+                return values[0] if values and isinstance(values[0], list) else []
+
+            return {
+                "checkpoints": _extract("CheckpointLoaderSimple", "ckpt_name"),
+                "loras":       _extract("LoraLoader",              "lora_name"),
+                "vaes":        _extract("VAELoader",               "vae_name"),
+                "clips":       _extract("CLIPLoader",              "clip_name"),
+            }
+        except Exception as e:
+            logger.error(f"모델 목록 일괄 조회 실패: {e}")
+            return {"checkpoints": [], "loras": [], "vaes": [], "clips": []}
+
     def submit_workflow(self, workflow_dict: dict) -> str:
         """워크플로우 JSON을 ComfyUI에 제출하고 prompt_id를 반환한다.
 
@@ -135,12 +210,10 @@ class ComfyUIClient:
         cancel_check_fn: Optional[Callable] = None,
         task_id: Optional[int] = None,
     ) -> None:
-        """WebSocket으로 ComfyUI 실행 완료를 감지한다.
+        """HTTP 폴링으로 ComfyUI 실행 완료를 감지한다.
 
-        ComfyUI WebSocket에서 수신하는 메시지 유형:
-        - "executed": 특정 프롬프트 실행 완료
-        - "execution_error": 실행 중 오류 발생
-        - "execution_cached": 캐시된 결과 사용 (완료로 간주)
+        /history/{prompt_id}를 3초 간격으로 조회하여 status.completed가
+        True가 될 때까지 대기한다. WebSocket 방식 대비 안정적.
 
         Args:
             prompt_id: 완료를 기다릴 프롬프트 ID
@@ -149,80 +222,79 @@ class ComfyUIClient:
             task_id: cancel_check_fn에 전달할 작업 ID
 
         Raises:
-            RuntimeError: websocket-client 미설치 또는 ComfyUI 실행 오류 시
+            RuntimeError: ComfyUI 실행 오류 시
             TimeoutError: timeout 초과 시
         """
-        try:
-            import websocket
-        except ImportError:
-            raise RuntimeError("websocket-client 패키지가 설치되지 않음. pip install websocket-client")
-
-        # 고유 클라이언트 ID로 WebSocket 연결
-        client_id = str(uuid.uuid4())
-        ws_endpoint = f"{self.ws_url}/ws?clientId={client_id}"
+        poll_interval = 3  # 3초마다 히스토리 폴링
         start_time = time.time()
+        logger.info(f"ComfyUI 완료 대기 시작 (prompt_id={prompt_id}, timeout={timeout}s, poll={poll_interval}s)")
 
-        logger.info(f"WebSocket 연결 시작: {ws_endpoint}")
-        ws = websocket.create_connection(ws_endpoint, timeout=30)
-        try:
-            # 5초 recv 타임아웃 -- 취소 감지 루프를 위한 짧은 단위 폴링
-            ws.settimeout(5.0)
-            while True:
-                # 전체 타임아웃 검사
-                elapsed = time.time() - start_time
-                if elapsed > timeout:
-                    raise TimeoutError(f"ComfyUI 실행 타임아웃: {timeout}초 초과")
+        while True:
+            # 전체 타임아웃 검사
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                raise TimeoutError(f"ComfyUI 실행 타임아웃: {timeout}초 초과")
 
-                # 외부 취소 신호 감지 — GPU 점유 해제를 위해 ComfyUI에 /interrupt 전송
-                if cancel_check_fn and task_id is not None:
-                    if cancel_check_fn(task_id):
-                        logger.info(f"[task_id={task_id}] 취소 감지 -- ComfyUI /interrupt 전송")
-                        try:
-                            with httpx.Client(timeout=5.0) as hx:
-                                hx.post(f"{self.base_url}/interrupt")
-                        except Exception as ie:
-                            logger.warning(f"ComfyUI /interrupt 전송 실패 (무시): {ie}")
-                        return
-
-                try:
-                    raw = ws.recv()
-                except Exception:
-                    # recv 타임아웃(5초) 발생 시 다음 루프로 진행
-                    continue
-
-                # 바이너리 메시지(프리뷰 이미지 등)는 건너뜀
-                if not isinstance(raw, str):
-                    continue
-
-                try:
-                    msg = json.loads(raw)
-                except json.JSONDecodeError:
-                    continue
-
-                msg_type = msg.get("type", "")
-                data = msg.get("data", {})
-
-                # 실행 완료 감지
-                if msg_type == "executed" and data.get("prompt_id") == prompt_id:
-                    logger.info(f"ComfyUI 실행 완료: prompt_id={prompt_id}")
+            # 외부 취소 신호 감지
+            if cancel_check_fn and task_id is not None:
+                if cancel_check_fn(task_id):
+                    logger.info(f"[task_id={task_id}] 취소 감지 -- ComfyUI /interrupt 전송")
+                    try:
+                        with httpx.Client(timeout=5.0) as hx:
+                            hx.post(f"{self.base_url}/interrupt")
+                    except Exception as ie:
+                        logger.warning(f"ComfyUI /interrupt 전송 실패 (무시): {ie}")
                     return
 
-                # 실행 오류 감지
-                if msg_type == "execution_error" and data.get("prompt_id") == prompt_id:
-                    error_msg = data.get("exception_message", "알 수 없는 오류")
-                    raise RuntimeError(f"ComfyUI 실행 오류: {error_msg}")
-
-                # 캐시된 결과 사용 (완료로 간주)
-                if msg_type == "execution_cached" and data.get("prompt_id") == prompt_id:
-                    logger.info(f"ComfyUI 캐시된 결과 사용: prompt_id={prompt_id}")
-                    return
-
-        finally:
-            # 연결 종료는 항상 보장
+            # /history/{prompt_id} 폴링으로 완료 여부 확인
             try:
-                ws.close()
-            except Exception:
-                pass
+                history = self.get_history(prompt_id)
+                if history:
+                    status = history.get("status", {})
+                    status_str = status.get("status_str", "")
+                    completed = status.get("completed", False)
+                    messages = status.get("messages", [])
+
+                    # 에러 메시지 탐지 — messages 리스트에서 execution_error 타입 탐색
+                    has_exec_error = any(
+                        (isinstance(m, (list, tuple)) and len(m) > 0 and m[0] == "execution_error")
+                        for m in messages
+                    )
+
+                    # completed 여부와 관계없이 에러 상태이면 즉시 실패 처리
+                    if status_str == "error" or has_exec_error:
+                        err_detail = str(messages) if messages else "알 수 없는 오류"
+                        raise RuntimeError(f"ComfyUI 실행 오류: {err_detail}")
+
+                    if completed:
+                        logger.info(
+                            f"ComfyUI 실행 완료: prompt_id={prompt_id} "
+                            f"({int(elapsed)}초 경과)"
+                        )
+                        return
+                else:
+                    # history에 없으면 큐에서도 사라졌는지 확인
+                    # 큐에도 없고 history에도 없으면 아직 실행 전 — 계속 대기
+                    try:
+                        with httpx.Client(timeout=5.0) as hx:
+                            q = hx.get(f"{self.base_url}/queue").json()
+                        running_ids = {item[1] for item in q.get("queue_running", [])}
+                        pending_ids = {item[1] for item in q.get("queue_pending", [])}
+                        if prompt_id not in running_ids and prompt_id not in pending_ids:
+                            # 큐에도 없고 history에도 없음 — 드문 경우, 한 번 더 history 재조회
+                            history2 = self.get_history(prompt_id)
+                            if not history2:
+                                logger.warning(
+                                    f"prompt_id={prompt_id} — 큐와 히스토리 모두에서 사라짐 (재시도)"
+                                )
+                    except Exception:
+                        pass
+            except RuntimeError:
+                raise
+            except Exception as e:
+                logger.warning(f"ComfyUI 히스토리 조회 실패 (재시도): {e}")
+
+            time.sleep(poll_interval)
 
     def get_history(self, prompt_id: str) -> dict:
         """실행 결과 및 출력 파일명 조회.
@@ -279,6 +351,47 @@ class ComfyUIClient:
             resp.raise_for_status()
             logger.info(f"출력 파일 다운로드 완료: {filename} ({len(resp.content)} bytes)")
             return resp.content
+
+    def upload_image(self, image_bytes: bytes, filename: str = "input.png") -> str:
+        """ComfyUI에 이미지를 업로드하고 서버측 파일명을 반환한다.
+
+        img2img 워크플로우의 LoadImage 노드에서 참조할 파일명을 얻기 위해 사용.
+        /upload/image 엔드포인트에 multipart/form-data로 전송한다.
+
+        Args:
+            image_bytes: 업로드할 이미지 바이트 데이터
+            filename: ComfyUI 서버에 저장될 파일명 (기본 "input.png")
+
+        Returns:
+            ComfyUI에서 사용할 파일명 (LoadImage 노드 image 필드에 지정)
+
+        Raises:
+            RuntimeError: 업로드 실패 또는 HTTP 오류 시
+        """
+        try:
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.post(
+                    f"{self.base_url}/upload/image",
+                    files={"image": (filename, image_bytes, "image/png")},
+                    data={"type": "input", "overwrite": "true"},
+                )
+                if resp.status_code >= 400:
+                    try:
+                        err_body = resp.json()
+                    except Exception:
+                        err_body = resp.text
+                    raise RuntimeError(
+                        f"ComfyUI 이미지 업로드 실패 ({resp.status_code}): {err_body}"
+                    )
+                data = resp.json()
+                # 서버가 반환한 실제 파일명 사용 (없으면 전달한 filename 반환)
+                server_filename = data.get("name", filename)
+                logger.info(f"이미지 업로드 완료: {server_filename} ({len(image_bytes)} bytes)")
+                return server_filename
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(f"ComfyUI 이미지 업로드 중 오류: {e}") from e
 
     def reboot(self, manager_url: Optional[str] = None) -> None:
         """ComfyUI 서버를 재시작한다 (ComfyUI-Manager 필요).

@@ -10,16 +10,28 @@ Write-Host "=== Dash 개발 서버 종료 ===" -ForegroundColor Cyan
 function Stop-ByPort {
   param([int]$Port, [string]$Name)
 
+  # 1차: Get-NetTCPConnection (Listen 상태)
+  $procIds = @()
   $conns = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-  if (-not $conns) { return $false }
+  if ($conns) {
+    $procIds = $conns.OwningProcess | Where-Object { $_ -gt 0 } | Sort-Object -Unique
+  }
+
+  # 2차: Listen 미탐지 시 netstat -ano 기반으로 모든 :Port 연결에서 PID 추출
+  # TIME_WAIT·ESTABLISHED 포함 — 좀비 프로세스 및 실행 중 서버 모두 포착
+  if (-not $procIds) {
+    $procIds = netstat -ano |
+      Where-Object { $_ -match ":$Port\s" } |
+      ForEach-Object { ($_ -split '\s+')[-1] } |
+      Where-Object { $_ -match '^\d+$' -and [int]$_ -gt 0 } |
+      ForEach-Object { [int]$_ } |
+      Sort-Object -Unique
+  }
+
+  if (-not $procIds) { return $false }
 
   $killed = $false
-  $procIds = $conns.OwningProcess | Sort-Object -Unique
-
   foreach ($procId in $procIds) {
-    # PID 0은 시스템 예약 — 건너뜀
-    if ($procId -eq 0) { continue }
-
     $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
     if ($proc) {
       try {
@@ -31,7 +43,6 @@ function Stop-ByPort {
       }
     } else {
       # 프로세스는 이미 없지만 TCP 스택이 아직 포트를 점유 중 (Windows 지연 해제)
-      # 오류가 아니라 정상 종료된 상태로 처리
       Write-Host "  [완료] $Name (:$Port) — 프로세스 이미 종료됨 (PID $procId)" -ForegroundColor Gray
       $killed = $true
     }

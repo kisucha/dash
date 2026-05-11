@@ -23,6 +23,78 @@ from pipelines.f003_video_creation import style_mapper
 logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path(__file__).parent / "config.json"
+
+
+def _collect_missing_loras(
+    art_style: str,
+    params: dict,
+    config: dict,
+    base_model: str,
+    available_loras: list[str],
+) -> list[dict]:
+    """ComfyUI에 미설치된 LoRA 중 다운로드 소스가 설정된 항목을 수집한다.
+
+    style_loras는 config에 다운로드 소스 정보가 없으므로 경고만 출력.
+    detail_loras는 civitai_version_id 또는 hf_repo_id가 있으면 다운로드 대상에 추가.
+
+    Returns:
+        [{"filename": str, "model_type": "lora", "source": str, "source_id": str}, ...]
+    """
+    required: list[dict] = []
+
+    # 스타일 LoRA 미설치 확인 (다운로드 소스 없으면 경고만)
+    style_info = config.get("style_mapping", {}).get(art_style, {})
+    for lora in style_info.get("style_loras", []):
+        if lora["name"] not in available_loras:
+            logger.warning(
+                f"스타일 LoRA '{lora['name']}' ComfyUI 미설치 — "
+                "config에 다운로드 소스 미등록, 건너뜀"
+            )
+
+    # 디테일 LoRA 미설치 확인 (source 정보 있으면 다운로드 대상 추가)
+    raw_items = style_mapper._parse_detail_loras(params.get("detail_loras", ""))
+    detail_keys = [
+        item if isinstance(item, str) else item.get("key", "")
+        for item in raw_items
+        if item
+    ]
+
+    detail_map = config.get("detail_lora_mapping", {})
+    for key in detail_keys:
+        if key not in detail_map:
+            continue
+        info = detail_map[key]
+        if base_model not in info.get("base_models", []):
+            continue
+        filename = info["filename"]
+        if filename in available_loras:
+            continue
+        # 다운로드 소스 확인
+        civitai_id = info.get("civitai_version_id")
+        hf_repo = info.get("hf_repo_id")
+        if civitai_id:
+            required.append({
+                "filename": filename,
+                "model_type": "lora",
+                "source": "civitai",
+                "source_id": str(civitai_id),
+            })
+        elif hf_repo:
+            required.append({
+                "filename": filename,
+                "model_type": "lora",
+                "source": "huggingface",
+                "source_id": hf_repo,
+            })
+        else:
+            logger.warning(
+                f"디테일 LoRA '{key}' ({filename}) ComfyUI 미설치 — "
+                "다운로드 소스 미등록, 건너뜀"
+            )
+
+    return required
+
+
 # 출력 디렉토리 — config.json의 output_dir이 우선, 없으면 프로젝트 루트 기준 상대 경로 사용
 _OUTPUT_DIR = Path(__file__).parent.parent.parent / "storage" / "results" / "f003"
 
@@ -92,6 +164,64 @@ class F003Pipeline(BasePipeline):
                 f"스타일: {art_style}, 기반 모델: {base_model}"
             )
 
+            # [4.5] 모델 가용성 확인 및 자동 다운로드
+            # /object_info 단일 호출로 checkpoints·loras·vaes를 한꺼번에 조회 (중복 요청 방지)
+            _model_lists = client.get_all_model_lists()
+            available_checkpoints: list[str] = _model_lists["checkpoints"]
+            available_loras: list[str] = _model_lists["loras"]
+            _available_vaes: list[str] = _model_lists["vaes"]
+            logger.info(
+                f"[F003][task_id={task_id}] ComfyUI 가용 체크포인트 {len(available_checkpoints)}개, "
+                f"LoRA {len(available_loras)}개, VAE {len(_available_vaes)}개"
+            )
+
+            # 체크포인트 존재 여부 사전 검증 (Flux.1 제외 — UNETLoader 경로 사용)
+            if base_model != "Flux.1":
+                custom_cp = params.get("custom_checkpoint", "").strip()
+                required_checkpoint = custom_cp if custom_cp else style_mapper.resolve_checkpoint(art_style, config)
+                if available_checkpoints and required_checkpoint not in available_checkpoints:
+                    raise RuntimeError(
+                        f"필요한 체크포인트 '{required_checkpoint}'이(가) ComfyUI에 설치되어 있지 않습니다. "
+                        f"설치된 체크포인트: {available_checkpoints}"
+                    )
+
+            # custom_vae 설치 여부 사전 검증 — 이미 조회된 목록 재사용
+            custom_vae = params.get("custom_vae", "").strip()
+            if custom_vae and _available_vaes and custom_vae not in _available_vaes:
+                raise RuntimeError(
+                    f"선택한 VAE '{custom_vae}'이(가) ComfyUI에 설치되어 있지 않습니다. "
+                    f"설치된 VAE: {_available_vaes}"
+                )
+
+            # 필요한 LoRA 중 미설치 항목을 자동 다운로드 시도
+            mm = ModelManager(config.get("comfyui_path", r"C:\ComfyUI"))
+            mm.scan_local_models()
+            required_lora_models = _collect_missing_loras(
+                art_style=art_style,
+                params=params,
+                config=config,
+                base_model=base_model,
+                available_loras=available_loras,
+            )
+            if required_lora_models:
+                logger.info(
+                    f"[F003][task_id={task_id}] 미설치 LoRA {len(required_lora_models)}개 "
+                    f"자동 다운로드 시작: {[m['filename'] for m in required_lora_models]}"
+                )
+                ok = mm.ensure_models(
+                    required_models=required_lora_models,
+                    comfyui_client=client,
+                    manager_url=config.get("comfyui_manager_url"),
+                )
+                if ok:
+                    # 다운로드 완료 후 가용 목록 갱신
+                    available_loras = client.get_available_loras()
+                    logger.info(f"[F003][task_id={task_id}] 다운로드 완료, LoRA 목록 갱신")
+
+            if self.is_cancelled(task_id):
+                self.update_status(task_id, "CANCELLED")
+                return {}
+
             # [5] 프롬프트 생성 (Ollama)
             style_context = style_mapper.build_prompt_keywords(params, config)
             user_description = params.get("user_description", "")
@@ -110,19 +240,65 @@ class F003Pipeline(BasePipeline):
                 self.update_status(task_id, "CANCELLED")
                 return {}
 
+            # [5.5] LoRA 트리거 워드를 포지티브 프롬프트에 주입
+            # detail_loras 파라미터를 파싱해 키 목록으로 변환
+            _raw = style_mapper._parse_detail_loras(params.get("detail_loras", ""))
+            _detail_keys_for_trigger = [
+                item if isinstance(item, str) else item.get("key", "")
+                for item in _raw if item
+            ]
+
+            trigger_words = style_mapper.collect_trigger_words(
+                art_style=art_style,
+                detail_lora_keys=_detail_keys_for_trigger,
+                base_model=base_model,
+                config=config,
+                available_loras=available_loras,
+            )
+            if trigger_words:
+                tw_str = ", ".join(trigger_words)
+                current_positive = prompt.get("positive") or prompt.get("flux_prompt", "")
+                # 이미 주입된 트리거 워드는 중복 추가하지 않음
+                if tw_str not in current_positive:
+                    new_positive = f"{tw_str}, {current_positive}" if current_positive else tw_str
+                    if "flux_prompt" in prompt:
+                        prompt = {**prompt, "positive": new_positive, "flux_prompt": new_positive}
+                    else:
+                        prompt = {**prompt, "positive": new_positive}
+                logger.info(f"[F003][task_id={task_id}] 트리거 워드 주입: {trigger_words}")
+
             # [6] 시드 처리 (-1이면 무작위 생성)
             seed = int(params.get("seed", -1))
             if seed == -1:
                 seed = random.randint(0, 2**32 - 1)
             params_with_seed = {**params, "seed": seed}
 
-            # [7] 워크플로우 JSON 조립
+            # [6.5] 입력 이미지 처리 (img2img 모드)
+            # params에 input_image(base64)가 있으면 ComfyUI에 업로드하고 파일명을 얻는다
+            import base64 as _base64
+            input_image_b64 = params.get("input_image", "")
+            comfyui_image_filename = None
+            if input_image_b64:
+                # data:image/xxx;base64, 헤더가 있으면 제거하고 순수 base64만 추출
+                if "," in input_image_b64:
+                    input_image_b64 = input_image_b64.split(",", 1)[1]
+                image_bytes = _base64.b64decode(input_image_b64)
+                comfyui_image_filename = client.upload_image(
+                    image_bytes, f"task_{task_id}_input.png"
+                )
+                logger.info(
+                    f"[F003][task_id={task_id}] 입력 이미지 업로드: {comfyui_image_filename}"
+                )
+
+            # [7] 워크플로우 JSON 조립 — ComfyUI 가용 목록 기준으로 LoRA 필터링
             workflow = style_mapper.build_workflow(
                 generation_type=generation_type,
                 art_style=art_style,
                 prompt=prompt,
                 params=params_with_seed,
                 config=config,
+                available_loras=available_loras,
+                input_image_filename=comfyui_image_filename,
             )
             logger.info(
                 f"[F003][task_id={task_id}] 워크플로우 조립 완료 (노드 수: {len(workflow)})"
@@ -185,6 +361,7 @@ class F003Pipeline(BasePipeline):
                 "file_size_bytes": len(file_bytes),
                 "seed": seed,
                 "prompt_positive": prompt.get("positive", "")[:300],
+                "prompt_negative": prompt.get("negative", "")[:300],
             }
             self.update_status(task_id, "DONE", result=result)
             logger.info(f"[F003][task_id={task_id}] 파이프라인 완료")

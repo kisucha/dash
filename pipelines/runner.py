@@ -246,8 +246,6 @@ def main() -> None:
 
         # F003 등 파이프라인이 run() 내부에서 update_status(DONE)을 직접 호출한 경우 중복 방지
         # 아직 DONE이 아닌 경우에만 보장용 업데이트 실행
-        import sqlite3
-        from core.config import DB_PATH
         with sqlite3.connect(DB_PATH) as _chk:
             row = _chk.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
         if row and row[0] != "DONE":

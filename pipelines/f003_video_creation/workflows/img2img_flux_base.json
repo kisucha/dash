@@ -27,12 +27,27 @@
       "text": "A beautiful detailed illustration"
     }
   },
-  "7": {
-    "class_type": "EmptyLatentImage",
+  "4": {
+    "class_type": "LoadImage",
     "inputs": {
+      "image": "input.png"
+    }
+  },
+  "12": {
+    "class_type": "ImageScale",
+    "inputs": {
+      "image": ["4", 0],
       "width": 512,
       "height": 768,
-      "batch_size": 1
+      "upscale_method": "lanczos",
+      "crop": "disabled"
+    }
+  },
+  "11": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["12", 0],
+      "vae": ["2", 0]
     }
   },
   "8": {
@@ -41,13 +56,13 @@
       "model": ["1", 0],
       "positive": ["6", 0],
       "negative": ["6", 0],
-      "latent_image": ["7", 0],
+      "latent_image": ["11", 0],
       "seed": -1,
       "steps": 20,
       "cfg": 1.0,
       "sampler_name": "euler",
       "scheduler": "simple",
-      "denoise": 1.0
+      "denoise": 0.75
     }
   },
   "9": {
@@ -61,7 +76,7 @@
     "class_type": "SaveImage",
     "inputs": {
       "images": ["9", 0],
-      "filename_prefix": "Flux"
+      "filename_prefix": "img2img_Flux"
     }
   }
 }

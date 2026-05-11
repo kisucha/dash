@@ -273,8 +273,25 @@ onUnmounted(() => {
             <span v-if="parsedResult.base_model"> | 기반 모델: {{ parsedResult.base_model }}</span>
             <span v-if="parsedResult.seed"> | 시드: {{ parsedResult.seed }}</span>
           </div>
-          <!-- 파일 경로 -->
-          <div class="result-file">파일: {{ parsedResult.file_path }}</div>
+          <!-- 파일 경로 — 클릭 시 브라우저에서 직접 열기 -->
+          <div class="result-file">
+            파일:
+            <a
+              :href="`/results/f003/${parsedResult.file_name}`"
+              target="_blank"
+              class="result-file-link"
+            >{{ parsedResult.file_name }}</a>
+          </div>
+          <!-- 포지티브 프롬프트 -->
+          <div v-if="parsedResult.prompt_positive" class="prompt-section">
+            <div class="prompt-label">포지티브 프롬프트</div>
+            <div class="prompt-box">{{ parsedResult.prompt_positive }}</div>
+          </div>
+          <!-- 네거티브 프롬프트 (있을 때만 표시) -->
+          <div v-if="parsedResult.prompt_negative" class="prompt-section">
+            <div class="prompt-label">네거티브 프롬프트</div>
+            <div class="prompt-box">{{ parsedResult.prompt_negative }}</div>
+          </div>
         </template>
         <!-- 그 외: 들여쓰기 JSON -->
         <pre v-else class="json-block">{{ formatJson(task.result) }}</pre>
@@ -597,5 +614,41 @@ onUnmounted(() => {
   color: #bbb;
   font-family: monospace;
   word-break: break-all;
+}
+
+/* 파일 링크 — 밑줄 + 호버 시 밝아짐 */
+.result-file-link {
+  color: #90caf9;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.result-file-link:hover {
+  color: #bbdefb;
+}
+
+/* 프롬프트 섹션 — 포지티브/네거티브 프롬프트 표시 영역 */
+.prompt-section {
+  margin-top: 10px;
+}
+
+/* 프롬프트 레이블 — 섹션 제목 */
+.prompt-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+/* 프롬프트 내용 — 회색 배경 박스, 작은 폰트 */
+.prompt-box {
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #555;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 </style>

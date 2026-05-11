@@ -121,3 +121,16 @@ export const triggerDownload = (payload) => api.post('/api/model-assets/download
 
 // 로컬 모델 재스캔
 export const scanLocalModels = () => api.post('/api/model-assets/scan')
+
+// ────────────────────────────────────────────────
+// F003 LoRA API — 카테고리별 LoRA 목록 및 사전 다운로드
+// ────────────────────────────────────────────────
+
+// F003 LoRA 목록 조회 — 카테고리별 그룹, ComfyUI 설치 여부 포함
+export const getF003Loras = () => api.get('/api/features/f003/loras')
+
+// F003 LoRA 사전 다운로드 트리거 — 미설치 & 다운로드 가능 항목을 백그라운드 다운로드
+export const predownloadF003Loras = () => api.post('/api/features/f003/loras/predownload')
+
+// F003 ComfyUI 설치 모델 목록 조회 — checkpoints, vaes, loras, clips
+export const getF003Models = () => api.get('/api/features/f003/models')

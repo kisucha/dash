@@ -13,8 +13,8 @@ sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 logger = logging.getLogger(__name__)
 
-# SQLite DB 경로 (동기 sqlite3 사용)
-DB_PATH: str = r"C:\Develop\Dash\storage\dash.db"
+# SQLite DB 경로 — 프로젝트 루트 기준 상대 경로
+DB_PATH: str = str(Path(__file__).parent.parent.parent / "storage" / "dash.db")
 
 # CivitAI REST API 기본 URL
 CIVITAI_API_BASE = "https://civitai.com"
@@ -275,7 +275,11 @@ class ModelManager:
 
         try:
             self._update_download_queue(queue_id, "DOWNLOADING", 0.0)
-            with httpx.Client(timeout=None, follow_redirects=True) as client:
+            # 연결 타임아웃만 제한 (30초) — 대용량 파일 다운로드는 read 무제한 허용
+            with httpx.Client(
+                timeout=httpx.Timeout(connect=30.0, read=None, write=None, pool=None),
+                follow_redirects=True,
+            ) as client:
                 with client.stream("GET", download_url, headers=headers) as resp:
                     resp.raise_for_status()
                     total = int(resp.headers.get("content-length", 0))
