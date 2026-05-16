@@ -7,11 +7,13 @@ import { useRouter } from 'vue-router'
 import { useTaskStore } from '../store/tasks.js'
 import { useOllamaStore } from '../store/ollama.js'
 import { useF001Store } from '../store/f001.js'
+import { useF005Store } from '../store/f005.js'
 import StatusBadge from '../components/StatusBadge.vue'
 
 const router = useRouter()
 const taskStore = useTaskStore()
 const f001Store = useF001Store()
+const f005Store = useF005Store()
 const ollama = useOllamaStore()
 
 // ── feature_id → feature 객체 빠른 조회용 Map ──
@@ -41,7 +43,14 @@ const recentHistory = computed(() => {
     status: j.status,
     created_at: j.created_at,
   }))
-  const merged = [...taskItems, ...f001Items]
+  const f005Items = f005Store.jobs.map((j) => ({
+    _type: 'f005',
+    id: j.id,
+    featureName: 'F005 유튜브 제작(채팅기반)',
+    status: j.status,
+    created_at: j.created_at,
+  }))
+  const merged = [...taskItems, ...f001Items, ...f005Items]
   merged.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   return merged.slice(0, 15)
 })
@@ -50,6 +59,8 @@ const recentHistory = computed(() => {
 function goToHistory(item) {
   if (item._type === 'f001') {
     router.push({ name: 'F001JobDetail', params: { jobId: item.id } })
+  } else if (item._type === 'f005') {
+    router.push({ name: 'F005JobDetail', params: { jobId: item.id } })
   } else {
     router.push({ name: 'TaskDetail', params: { id: item.id } })
   }
@@ -72,6 +83,8 @@ async function deleteHistory(item) {
   try {
     if (item._type === 'f001') {
       await f001Store.deleteJob(item.id)
+    } else if (item._type === 'f005') {
+      await f005Store.deleteJob(item.id)
     } else {
       await taskStore.deleteTaskRecord(item.id)
     }
@@ -89,6 +102,7 @@ function startPolling() {
   pollTimer = setInterval(() => {
     taskStore.fetchTasks(10)
     f001Store.fetchJobs(10)
+    f005Store.fetchJobs(10)
   }, 10000)
   ollamaTimer = setInterval(() => ollama.loadModels(), 30000)
 }
@@ -102,6 +116,7 @@ onMounted(async () => {
   taskStore.fetchFeatures().catch(() => {})
   taskStore.fetchTasks(10).catch(() => {})
   f001Store.fetchJobs(10).catch(() => {})
+  f005Store.fetchJobs(10).catch(() => {})
   if (ollama.status === 'loading') {
     await ollama.loadModels()
   } else {
@@ -169,13 +184,15 @@ onUnmounted(() => stopPolling())
             v-for="feature in taskStore.features"
             :key="feature.feature_id"
             class="clickable-row"
-            @click="feature.feature_id === 'F004'
-              ? router.push({ name: 'F004Feature' })
-              : feature.feature_id === 'F003'
-                ? router.push({ name: 'F003Feature' })
-                : feature.feature_id === 'F001'
-                  ? router.push({ name: 'F001Feature' })
-                  : router.push({ name: 'Feature', params: { id: feature.feature_id } })"
+            @click="feature.feature_id === 'F005'
+              ? router.push({ name: 'F005Feature' })
+              : feature.feature_id === 'F004'
+                ? router.push({ name: 'F004Feature' })
+                : feature.feature_id === 'F003'
+                  ? router.push({ name: 'F003Feature' })
+                  : feature.feature_id === 'F001'
+                    ? router.push({ name: 'F001Feature' })
+                    : router.push({ name: 'Feature', params: { id: feature.feature_id } })"
           >
             <td class="center feature-id-cell">{{ feature.feature_id }}</td>
             <td class="feature-name-cell">{{ feature.name }}</td>
@@ -189,7 +206,7 @@ onUnmounted(() => stopPolling())
       </table>
     </section>
 
-    <!-- ── 최근 실행 이력 (tasks + F001 content_jobs 통합) ── -->
+    <!-- ── 최근 실행 이력 (tasks + F001 + F005 content_jobs 통합) ── -->
     <section class="section">
       <h2 class="section-title">최근 실행 이력</h2>
 

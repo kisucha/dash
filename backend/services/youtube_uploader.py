@@ -1,6 +1,6 @@
 # 목적: YouTube Data API v3 업로드 유틸리티 — httpx 기반 비동기 구현.
 # OAuth2 refresh_token으로 access_token을 갱신하고 resumable upload로 영상을 업로드한다.
-# backend/routers/f004.py approve 엔드포인트에서 호출한다.
+# backend/routers/f004.py, f005.py approve 엔드포인트에서 호출한다.
 
 import sys
 import json
@@ -22,8 +22,11 @@ OAUTH2_TOKEN_URL = "https://oauth2.googleapis.com/token"
 # YouTube 영상 업로드 엔드포인트 (resumable)
 YOUTUBE_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
 
-# F004 config.json 경로 — 이 파일 기준 상대 경로
-_F004_CONFIG_PATH = Path(__file__).parent.parent.parent / "pipelines" / "f004_youtube_v2" / "config.json"
+# 각 파이프라인 config.json 경로 — 우선순위 순서
+_CONFIG_PATHS = [
+    Path(__file__).parent.parent.parent / "pipelines" / "f005_youtube_v3" / "config.json",
+    Path(__file__).parent.parent.parent / "pipelines" / "f004_youtube_v2" / "config.json",
+]
 
 
 def load_youtube_credentials() -> dict:
@@ -31,7 +34,8 @@ def load_youtube_credentials() -> dict:
 
     우선순위:
       1. 환경변수 YOUTUBE_CLIENT_ID / YOUTUBE_CLIENT_SECRET / YOUTUBE_REFRESH_TOKEN
-      2. pipelines/f004_youtube_v2/config.json
+      2. pipelines/f005_youtube_v3/config.json
+      3. pipelines/f004_youtube_v2/config.json
 
     Returns:
         {"client_id": str, "client_secret": str, "refresh_token": str}
@@ -44,15 +48,18 @@ def load_youtube_credentials() -> dict:
     refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN", "")
 
     if not (client_id and client_secret and refresh_token):
-        # 환경변수 없으면 config.json 읽기
-        try:
-            with open(_F004_CONFIG_PATH, encoding="utf-8") as f:
-                cfg = json.load(f)
-            client_id = client_id or cfg.get("youtube_client_id", "")
-            client_secret = client_secret or cfg.get("youtube_client_secret", "")
-            refresh_token = refresh_token or cfg.get("youtube_refresh_token", "")
-        except Exception as e:
-            logger.warning(f"F004 config.json 읽기 실패: {e}")
+        # 환경변수 없으면 파이프라인 config.json 순서대로 탐색
+        for config_path in _CONFIG_PATHS:
+            try:
+                with open(config_path, encoding="utf-8") as f:
+                    cfg = json.load(f)
+                client_id = client_id or cfg.get("youtube_client_id", "")
+                client_secret = client_secret or cfg.get("youtube_client_secret", "")
+                refresh_token = refresh_token or cfg.get("youtube_refresh_token", "")
+                if client_id and client_secret and refresh_token:
+                    break
+            except Exception as e:
+                logger.warning(f"config.json 읽기 실패 ({config_path.name}): {e}")
 
     missing = []
     if not client_id:
@@ -65,7 +72,7 @@ def load_youtube_credentials() -> dict:
     if missing:
         raise RuntimeError(
             f"YouTube API 인증 정보 미설정: {', '.join(missing)}. "
-            f"pipelines/f004_youtube_v2/config.json 또는 환경변수에 설정하세요."
+            f"pipelines/f005_youtube_v3/config.json 또는 환경변수에 설정하세요."
         )
 
     return {
@@ -140,7 +147,7 @@ async def upload_video(
     Raises:
         RuntimeError: 파일 없음 / 업로드 실패
     """
-    log_prefix = f"[F004][YouTube][job_id={job_id}]" if job_id else "[F004][YouTube]"
+    log_prefix = f"[YouTube][job_id={job_id}]" if job_id else "[YouTube]"
 
     video_file = Path(video_path)
     if not video_file.exists():

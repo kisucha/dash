@@ -372,6 +372,13 @@ FEATURES: dict[str, dict] = {
         "supports_schedule": False,
         "input_schema": [],
     },
+    "F005": {
+        "feature_id": "F005",
+        "name": "유튜브 제작(채팅 기반)",
+        "description": "AI 채팅에서 확인한 정보를 기반으로 컨텐츠 제작",
+        "supports_schedule": False,
+        "input_schema": [],
+    },
 }
 
 

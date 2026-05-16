@@ -1,8 +1,11 @@
 <!-- ChatPanel.vue — 우측 채팅 패널 컴포넌트 -->
 <!-- Ollama LLM과 SSE 스트리밍 채팅, 인터넷 검색 컨텍스트 삽입 지원 -->
 <script setup>
-import { ref, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, nextTick, onMounted, onUnmounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { sendChatStream, searchWeb, refineQuery } from '../api/index.js'
+
+const router = useRouter()
 
 // ── props: 인터넷 사용 여부 및 검색 엔진은 부모(App.vue)에서 관리 ──
 const props = defineProps({
@@ -252,6 +255,20 @@ function onKeydown(e) {
   }
 }
 
+// 마지막 assistant 메시지 — F005 컨텐츠 만들기 버튼 표시 기준
+// loading=false인 마지막 assistant 메시지에만 버튼 노출
+const lastAssistantMsgId = computed(() => {
+  const assistants = messages.value.filter(m => m.role === 'assistant' && !m.loading)
+  if (assistants.length === 0) return null
+  return assistants[assistants.length - 1].id
+})
+
+// F005 컨텐츠 만들기 — 마지막 assistant 메시지 내용을 chatContext로 F005 페이지로 이동
+function goToF005(msgContent) {
+  const chatContext = (msgContent ?? '').slice(0, 2000)
+  router.push({ name: 'F005', query: { chatContext } })
+}
+
 // 부모(App.vue)가 라우트 이동 등의 상황에서 포커스를 복원할 수 있도록 노출
 defineExpose({ focusInput: () => inputRef.value?.focus() })
 </script>
@@ -318,6 +335,10 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
               :disabled="streaming"
               @click="sendSuggestion(sug)"
             >{{ sug }}</button>
+          </div>
+          <!-- F005 컨텐츠 만들기 버튼 — 마지막 assistant 메시지(로딩 완료)에만 표시 -->
+          <div v-if="!msg.loading && msg.id === lastAssistantMsgId" class="f005-action-row">
+            <button class="btn-f005-create" @click="goToF005(msg.content)">F005 컨텐츠 만들기</button>
           </div>
         </div>
       </div>
@@ -592,6 +613,29 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* F005 컨텐츠 만들기 버튼 */
+.f005-action-row {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #e0e0e0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-f005-create {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.btn-f005-create:hover { background: #6d28d9; }
 
 /* 전송 버튼 */
 .send-btn {

@@ -152,6 +152,9 @@ function downloadSrt() {
 // SRT 접기/펼치기 상태
 const srtExpanded = ref(false)
 
+// STAGE_01_INPUT enriched_context 접기/펼치기 상태
+const enrichedExpanded = ref(false)
+
 // 클립 목록 (STAGE_04_VIDEO_GEN)
 const clipList = computed(() => parsedOutput.value?.clips ?? [])
 
@@ -209,6 +212,39 @@ const selectedTopicTitle = computed(() => {
     <div v-else-if="!parsedOutput && stage.status !== 'PENDING'" class="viewer-empty">
       결과 데이터가 없습니다.
       <span v-if="stage.status === 'RUNNING'" class="running-hint">진행 중...</span>
+    </div>
+
+    <!-- STAGE_01_INPUT — F005 채팅 기반 입력 컨텍스트 결과 -->
+    <div v-else-if="stage.stage_id === 'STAGE_01_INPUT'" class="stage-result">
+      <h3 class="result-title">입력 컨텍스트 처리 결과</h3>
+      <div v-if="!parsedOutput" class="viewer-empty">결과 데이터가 없습니다.</div>
+      <div v-else class="input-context-view">
+        <!-- 입력 주제 -->
+        <div class="context-item">
+          <div class="context-label">입력 주제</div>
+          <div class="context-value">{{ parsedOutput.selected_topic ?? '-' }}</div>
+        </div>
+        <!-- 보완 검색 결과 수 -->
+        <div v-if="parsedOutput.searxng_results_count != null" class="context-item">
+          <div class="context-label">보완 검색 결과 수</div>
+          <div class="context-value">{{ parsedOutput.searxng_results_count }}건</div>
+        </div>
+        <!-- 사용자 입력 컨텍스트 -->
+        <div v-if="parsedOutput.user_context" class="context-item">
+          <div class="context-label">사용자 입력 컨텍스트</div>
+          <pre class="context-pre">{{ parsedOutput.user_context }}</pre>
+        </div>
+        <!-- enriched_context 접기/펼치기 -->
+        <div v-if="parsedOutput.enriched_context" class="context-item">
+          <div class="context-label-row">
+            <span class="context-label">보강된 컨텍스트 (enriched_context)</span>
+            <button class="btn-toggle-context" @click="enrichedExpanded = !enrichedExpanded">
+              {{ enrichedExpanded ? '접기' : '펼치기' }}
+            </button>
+          </div>
+          <pre v-if="enrichedExpanded" class="context-pre context-pre--enriched">{{ parsedOutput.enriched_context }}</pre>
+        </div>
+      </div>
     </div>
 
     <!-- STAGE_01_RESEARCH — 주제 발굴 결과 -->
@@ -584,6 +620,78 @@ const selectedTopicTitle = computed(() => {
   padding-bottom: 8px;
   border-bottom: 1px solid #f0f0f0;
 }
+
+/* ── STAGE_01_INPUT: 입력 컨텍스트 ── */
+.input-context-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.context-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #6d28d9;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.context-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.context-value {
+  font-size: 14px;
+  color: #222;
+  font-weight: 500;
+  padding: 8px 12px;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  border-radius: 6px;
+}
+
+.context-pre {
+  font-size: 12px;
+  color: #444;
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: monospace;
+  line-height: 1.6;
+  max-height: 280px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+.context-pre--enriched {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+  max-height: 320px;
+}
+
+.btn-toggle-context {
+  font-size: 11px;
+  padding: 3px 10px;
+  background: #fff;
+  border: 1px solid #ddd6fe;
+  border-radius: 5px;
+  color: #7c3aed;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.12s;
+}
+.btn-toggle-context:hover { background: #ede9fe; }
 
 /* ── STAGE_01: 주제 발굴 ── */
 .topic-list {

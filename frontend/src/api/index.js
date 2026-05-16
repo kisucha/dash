@@ -215,3 +215,21 @@ export const deleteF004Job = (jobId) => api.delete(`/api/f004/jobs/${jobId}`)
 // F004 스크립트 수정 후 TTS부터 재생성 — script_text 필수, slides 선택
 export const rerunF004FromTTS = (jobId, payload) =>
   api.post(`/api/f004/jobs/${jobId}/rerun-from-tts`, payload)
+
+// ────────────────────────────────────────────────
+// F005 API — 유튜브 컨텐츠 제작 채팅 기반 파이프라인
+// ────────────────────────────────────────────────
+export const getF005Jobs = (limit = 20, cursor = null, status = null) =>
+  api.get('/api/f005/jobs', { params: { limit, ...(cursor != null ? { cursor } : {}), ...(status ? { status } : {}) } })
+
+export const getF005Job = (jobId) => api.get(`/api/f005/jobs/${jobId}`)
+export const createF005Job = (params) => api.post('/api/f005/jobs', params)
+export const retryF005Stage = (jobId, stageId, overrideParams = null) =>
+  api.post(`/api/f005/jobs/${jobId}/stages/${stageId}/retry`, { override_params: overrideParams })
+export const rejectF005Stage = (jobId, stageId, reason, rejectionTarget = null) =>
+  api.post(`/api/f005/jobs/${jobId}/stages/${stageId}/reject`, { rejection_reason: reason, rejection_target: rejectionTarget })
+export const approveF005Job = (jobId, finalMeta = {}) =>
+  api.post(`/api/f005/jobs/${jobId}/approve`, finalMeta)
+export const deleteF005Job = (jobId) => api.delete(`/api/f005/jobs/${jobId}`)
+export const rerunF005FromTTS = (jobId, payload) =>
+  api.post(`/api/f005/jobs/${jobId}/rerun-from-tts`, payload)
