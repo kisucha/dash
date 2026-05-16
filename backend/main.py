@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from core.config import DB_PATH
 from core.database import init_db
 from models.task import row_to_dict
-from routers import chat, features, health, models, model_assets, schedules, search, tasks
+from routers import chat, features, health, models, model_assets, schedules, search, tasks, f001, f004
 
 
 async def _restore_schedules(app: FastAPI) -> None:
@@ -78,6 +78,60 @@ async def _cleanup_stale_running_tasks() -> None:
             print(f"[App] 미완료 RUNNING 태스크 {count}건 → FAILED 처리 완료")
 
 
+async def _restore_f001_running_jobs() -> None:
+    """서버 재시작 시 RUNNING 상태 content_jobs에 대해 오케스트레이터를 재기동한다.
+
+    중단된 RUNNING 스테이지는 PENDING으로 리셋해 재실행을 보장한다.
+    WAITING 상태 job은 사용자 개입이 필요하므로 건드리지 않는다.
+    """
+    from services.f001_service import f001_service
+
+    async with aiosqlite.connect(DB_PATH) as conn:
+        # 중단된 RUNNING 스테이지를 PENDING으로 리셋
+        await conn.execute(
+            """
+            UPDATE stages
+            SET status = 'PENDING', started_at = NULL, finished_at = NULL
+            WHERE status = 'RUNNING'
+            """
+        )
+        # RUNNING 상태 content_jobs 목록 조회
+        cursor = await conn.execute(
+            "SELECT id FROM content_jobs WHERE status = 'RUNNING'"
+        )
+        rows = await cursor.fetchall()
+        await conn.commit()
+
+    for row in rows:
+        job_id = row[0]
+        f001_service._spawn_orchestrator(job_id)
+        print(f"[App] content_jobs id={job_id} 오케스트레이터 재기동 완료")
+
+
+async def _restore_f004_running_jobs() -> None:
+    """서버 재시작 시 F004 RUNNING 상태 content_jobs 오케스트레이터 재기동."""
+    from services.f004_service import f004_service
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            """
+            UPDATE stages
+            SET status = 'PENDING', started_at = NULL, finished_at = NULL
+            WHERE status = 'RUNNING' AND job_id IN (
+                SELECT id FROM content_jobs WHERE feature_id = 'F004' AND status = 'RUNNING'
+            )
+            """
+        )
+        cursor = await conn.execute(
+            "SELECT id FROM content_jobs WHERE feature_id = 'F004' AND status = 'RUNNING'"
+        )
+        rows = await cursor.fetchall()
+        await conn.commit()
+    for row in rows:
+        job_id = row[0]
+        f004_service._spawn_orchestrator(job_id)
+        print(f"[App] F004 content_jobs id={job_id} 오케스트레이터 재기동 완료")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """앱 생명주기 관리 — 시작 시 DB/스케줄러 초기화, 종료 시 스케줄러 정지."""
@@ -86,6 +140,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # 이전 실행에서 비정상 종료된 RUNNING 태스크 정리
     await _cleanup_stale_running_tasks()
+
+    # F001 RUNNING content_jobs 오케스트레이터 재기동
+    await _restore_f001_running_jobs()
+
+    # F004 RUNNING content_jobs 오케스트레이터 재기동
+    await _restore_f004_running_jobs()
 
     scheduler = AsyncIOScheduler()
     scheduler.start()
@@ -128,11 +188,23 @@ def create_app() -> FastAPI:
     app.include_router(chat.router)
     app.include_router(search.router)
     app.include_router(model_assets.router)
+    app.include_router(f001.router)
+    app.include_router(f004.router)
 
     # F003 결과 파일 정적 서빙 (이미지/동영상) — 프로젝트 루트 기준 상대 경로
     f003_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f003"
     f003_results_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/results/f003", StaticFiles(directory=str(f003_results_dir)), name="f003_results")
+
+    # F001 결과 파일 정적 서빙 (스크립트/TTS/영상) — 프로젝트 루트 기준 상대 경로
+    f001_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f001"
+    f001_results_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/results/f001", StaticFiles(directory=str(f001_results_dir)), name="f001_results")
+
+    # F004 결과 파일 정적 서빙 (스크립트/TTS/영상) — 프로젝트 루트 기준 상대 경로
+    f004_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f004"
+    f004_results_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/results/f004", StaticFiles(directory=str(f004_results_dir)), name="f004_results")
 
     @app.get("/", include_in_schema=False)
     async def root():

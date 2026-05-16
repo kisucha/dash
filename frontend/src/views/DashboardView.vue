@@ -1,15 +1,17 @@
 <!-- DashboardView.vue — 메인 대시보드 페이지 (/) -->
-<!-- Ollama 연결 상태, 업무 목록(게시판), 최근 실행 이력(게시판+이력 삭제) -->
+<!-- Ollama 연결 상태, 업무 목록(게시판), 최근 실행 이력(tasks + F001 content_jobs 통합) -->
 <!-- 작업 목록은 10초 폴링, Ollama 상태는 30초 폴링 -->
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTaskStore } from '../store/tasks.js'
 import { useOllamaStore } from '../store/ollama.js'
+import { useF001Store } from '../store/f001.js'
 import StatusBadge from '../components/StatusBadge.vue'
 
 const router = useRouter()
 const taskStore = useTaskStore()
+const f001Store = useF001Store()
 const ollama = useOllamaStore()
 
 // ── feature_id → feature 객체 빠른 조회용 Map ──
@@ -23,6 +25,36 @@ function getFeatureName(featureId) {
   return featureMap.value[featureId]?.name ?? featureId
 }
 
+// ── 최근 이력 통합 — tasks 테이블 + F001 content_jobs 합산, created_at DESC ──
+const recentHistory = computed(() => {
+  const taskItems = taskStore.tasks.map((t) => ({
+    _type: 'task',
+    id: t.id,
+    featureName: getFeatureName(t.feature_id),
+    status: t.status,
+    created_at: t.created_at,
+  }))
+  const f001Items = f001Store.jobs.map((j) => ({
+    _type: 'f001',
+    id: j.id,
+    featureName: 'F001 유튜브 컨텐츠 제작',
+    status: j.status,
+    created_at: j.created_at,
+  }))
+  const merged = [...taskItems, ...f001Items]
+  merged.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+  return merged.slice(0, 15)
+})
+
+// ── 이력 행 클릭 → 적절한 상세 페이지로 이동 ──
+function goToHistory(item) {
+  if (item._type === 'f001') {
+    router.push({ name: 'F001JobDetail', params: { jobId: item.id } })
+  } else {
+    router.push({ name: 'TaskDetail', params: { id: item.id } })
+  }
+}
+
 // ── 날짜 포맷 ──
 function formatDate(dateStr) {
   if (!dateStr) return '-'
@@ -34,11 +66,15 @@ function formatDate(dateStr) {
 }
 
 // ── 이력 삭제 ──
-async function deleteHistory(task) {
-  if (task.status === 'RUNNING') return
-  if (!confirm(`#${task.id} 이력을 삭제하시겠습니까?`)) return
+async function deleteHistory(item) {
+  if (item.status === 'RUNNING') return
+  if (!confirm(`#${item.id} 이력을 삭제하시겠습니까?`)) return
   try {
-    await taskStore.deleteTaskRecord(task.id)
+    if (item._type === 'f001') {
+      await f001Store.deleteJob(item.id)
+    } else {
+      await taskStore.deleteTaskRecord(item.id)
+    }
   } catch {
     alert('삭제에 실패했습니다.')
   }
@@ -50,7 +86,10 @@ let ollamaTimer = null
 
 function startPolling() {
   if (pollTimer) return
-  pollTimer = setInterval(() => taskStore.fetchTasks(10), 10000)
+  pollTimer = setInterval(() => {
+    taskStore.fetchTasks(10)
+    f001Store.fetchJobs(10)
+  }, 10000)
   ollamaTimer = setInterval(() => ollama.loadModels(), 30000)
 }
 
@@ -62,6 +101,7 @@ function stopPolling() {
 onMounted(async () => {
   taskStore.fetchFeatures().catch(() => {})
   taskStore.fetchTasks(10).catch(() => {})
+  f001Store.fetchJobs(10).catch(() => {})
   if (ollama.status === 'loading') {
     await ollama.loadModels()
   } else {
@@ -111,12 +151,14 @@ onUnmounted(() => stopPolling())
 
       <table v-else class="board-table">
         <colgroup>
+          <col style="width: 60px" />
           <col style="width: 200px" />
           <col />
           <col style="width: 90px" />
         </colgroup>
         <thead>
           <tr>
+            <th style="width: 60px" class="center">ID</th>
             <th>업무명</th>
             <th>설명</th>
             <th class="center">스케줄</th>
@@ -127,10 +169,15 @@ onUnmounted(() => stopPolling())
             v-for="feature in taskStore.features"
             :key="feature.feature_id"
             class="clickable-row"
-            @click="feature.feature_id === 'F003'
-              ? router.push({ name: 'F003Feature' })
-              : router.push({ name: 'Feature', params: { id: feature.feature_id } })"
+            @click="feature.feature_id === 'F004'
+              ? router.push({ name: 'F004Feature' })
+              : feature.feature_id === 'F003'
+                ? router.push({ name: 'F003Feature' })
+                : feature.feature_id === 'F001'
+                  ? router.push({ name: 'F001Feature' })
+                  : router.push({ name: 'Feature', params: { id: feature.feature_id } })"
           >
+            <td class="center feature-id-cell">{{ feature.feature_id }}</td>
             <td class="feature-name-cell">{{ feature.name }}</td>
             <td class="desc-cell">{{ feature.description }}</td>
             <td class="center">
@@ -142,11 +189,11 @@ onUnmounted(() => stopPolling())
       </table>
     </section>
 
-    <!-- ── 최근 실행 이력 ── -->
+    <!-- ── 최근 실행 이력 (tasks + F001 content_jobs 통합) ── -->
     <section class="section">
       <h2 class="section-title">최근 실행 이력</h2>
 
-      <div v-if="taskStore.tasks.length === 0" class="empty-text">
+      <div v-if="recentHistory.length === 0" class="empty-text">
         실행된 작업이 없습니다.
       </div>
 
@@ -169,23 +216,23 @@ onUnmounted(() => stopPolling())
         </thead>
         <tbody>
           <tr
-            v-for="task in taskStore.tasks"
-            :key="task.id"
+            v-for="item in recentHistory"
+            :key="`${item._type}-${item.id}`"
             class="clickable-row"
-            @click="router.push({ name: 'TaskDetail', params: { id: task.id } })"
+            @click="goToHistory(item)"
           >
-            <td class="center task-id-cell">#{{ task.id }}</td>
-            <td>{{ getFeatureName(task.feature_id) }}</td>
+            <td class="center task-id-cell">#{{ item.id }}</td>
+            <td>{{ item.featureName }}</td>
             <td class="center">
-              <StatusBadge :status="task.status" />
+              <StatusBadge :status="item.status" />
             </td>
-            <td class="time-cell">{{ formatDate(task.created_at) }}</td>
+            <td class="time-cell">{{ formatDate(item.created_at) }}</td>
             <td class="center" @click.stop>
               <button
                 class="delete-btn"
-                :disabled="task.status === 'RUNNING'"
-                :title="task.status === 'RUNNING' ? '실행 중인 작업은 삭제할 수 없습니다' : '이력 삭제'"
-                @click="deleteHistory(task)"
+                :disabled="item.status === 'RUNNING'"
+                :title="item.status === 'RUNNING' ? '실행 중인 작업은 삭제할 수 없습니다' : '이력 삭제'"
+                @click="deleteHistory(item)"
               >
                 🗑
               </button>
@@ -324,6 +371,13 @@ onUnmounted(() => stopPolling())
 }
 
 /* 업무 목록 셀 */
+.feature-id-cell {
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a90d9;
+}
+
 .feature-name-cell {
   font-weight: 600;
   color: #222;

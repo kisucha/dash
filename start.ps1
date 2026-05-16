@@ -11,7 +11,7 @@ Write-Host "[1/2] 백엔드 시작 중 (FastAPI :8000)..." -ForegroundColor Yell
 Start-Process powershell -ArgumentList @(
   "-NoExit",
   "-Command",
-  "Set-Location '$root\backend'; Write-Host '=== Backend ===' -ForegroundColor Green; python -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+  "Set-Location '$root\backend'; Write-Host '=== Backend ===' -ForegroundColor Green; py -3.11 -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 ) -WindowStyle Normal
 
 # 백엔드가 먼저 뜨도록 2초 대기

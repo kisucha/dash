@@ -9,7 +9,7 @@ import json
 import httpx
 import logging
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -35,8 +35,8 @@ except ImportError:
 # 로거 설정
 logger = logging.getLogger(__name__)
 
-# DB 경로 상수
-DB_PATH: str = r"C:\Develop\Dash\storage\dash.db"
+# DB 경로 상수 — pipelines/base.py 기준 두 단계 상위가 프로젝트 루트
+DB_PATH: str = str(Path(__file__).parent.parent / "storage" / "dash.db")
 
 # Ollama 기본 엔드포인트
 OLLAMA_BASE_URL: str = "http://localhost:11434"
@@ -362,45 +362,41 @@ class BasePipeline(ABC):
         self,
         query: str,
         max_results: int = 20,
+        time_range: str | None = None,
+        max_age_days: int | None = None,
     ) -> list[dict]:
         """
         SearXNG 로컬 인스턴스에서 검색하고 결과 리스트를 반환한다.
 
-        결과는 Tavily 형식과 동일한 dict 구조를 사용해 파이프라인 코드 공용화를 유지한다.
-        단, content 필드는 SearXNG 스니펫이므로 enrich_results()로 본문 보강을 권장한다.
-
         Args:
             query: 검색어
             max_results: 최대 결과 수 (기본 20)
+            time_range: SearXNG 날짜 범위 필터 ("day"/"week"/"month"/"year").
+                        None이면 필터 없음.
+            max_age_days: publishedDate 기준 최대 허용 일수.
+                          이보다 오래된 결과는 제외. None이면 필터 없음.
 
         Returns:
-            [{"title": str, "url": str, "content": str}, ...]
-
-        Raises:
-            RuntimeError: SearXNG 서버 연결 실패 또는 검색 오류
+            [{"title": str, "url": str, "content": str, "published_date": str}, ...]
         """
-        params = {
+        params: dict = {
             "q": query,
             "format": "json",
             "categories": "general",
         }
-        logger.info(f"SearXNG 검색 시작 — query: {query!r}, max_results: {max_results}")
+        if time_range:
+            params["time_range"] = time_range
+
+        logger.info(
+            f"SearXNG 검색 시작 — query: {query!r}, "
+            f"time_range: {time_range}, max_age_days: {max_age_days}"
+        )
+
         try:
             with httpx.Client(timeout=15.0) as client:
                 resp = client.get(f"{SEARXNG_BASE_URL}/search", params=params)
                 resp.raise_for_status()
                 data = resp.json()
-
-            results = [
-                {
-                    "title": r.get("title", ""),
-                    "url": r.get("url", ""),
-                    "content": r.get("content", ""),
-                }
-                for r in data.get("results", [])[:max_results]
-            ]
-            logger.info(f"SearXNG 검색 완료 — {len(results)}건 수신")
-            return results
 
         except httpx.ConnectError as e:
             raise RuntimeError(
@@ -408,6 +404,92 @@ class BasePipeline(ABC):
             ) from e
         except Exception as e:
             raise RuntimeError(f"SearXNG 검색 실패: {e}") from e
+
+        # max_age_days 기준 cutoff datetime
+        cutoff: datetime | None = None
+        if max_age_days:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
+
+        results: list[dict] = []
+        skipped = 0
+        # max_results * 3: 날짜 필터로 제외되는 결과를 보정하기 위해 여유분 순회
+        for r in data.get("results", [])[:max_results * 3]:
+            published: str = r.get("publishedDate") or r.get("published_date") or ""
+
+            # publishedDate 파싱 및 날짜 필터 적용
+            if cutoff and published:
+                try:
+                    pub_dt = datetime.fromisoformat(published.replace("Z", "+00:00"))
+                    if pub_dt.tzinfo is None:
+                        pub_dt = pub_dt.replace(tzinfo=timezone.utc)
+                    if pub_dt < cutoff:
+                        skipped += 1
+                        continue  # max_age_days 초과 — 제외
+                except (ValueError, TypeError):
+                    pass  # 날짜 파싱 실패 시 포함 (안전 우선)
+
+            results.append({
+                "title": r.get("title", ""),
+                "url": r.get("url", ""),
+                "content": r.get("content", ""),
+                "published_date": published,
+            })
+            if len(results) >= max_results:
+                break
+
+        logger.info(
+            f"SearXNG 검색 완료 — {len(results)}건 수신, "
+            f"{skipped}건 날짜 필터 제외 (max_age={max_age_days}일)"
+        )
+        return results
+
+    def call_searxng_images(
+        self,
+        query: str,
+        max_results: int = 10,
+    ) -> list[dict]:
+        """SearXNG 이미지 검색 — categories=images로 이미지 URL 목록 반환.
+
+        Args:
+            query: 검색어 (영어 권장)
+            max_results: 최대 결과 수 (기본 10)
+
+        Returns:
+            [{"title": str, "img_src": str, "url": str}, ...] — img_src가 이미지 직접 URL
+        """
+        params = {
+            "q": query,
+            "format": "json",
+            "categories": "images",
+        }
+        logger.info(f"SearXNG 이미지 검색 시작 — query: {query!r}")
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(f"{SEARXNG_BASE_URL}/search", params=params)
+                resp.raise_for_status()
+                data = resp.json()
+
+            results = []
+            for r in data.get("results", []):
+                img_src = r.get("img_src", "") or r.get("thumbnail", "")
+                if img_src:
+                    results.append({
+                        "title": r.get("title", ""),
+                        "img_src": img_src,
+                        "url": r.get("url", ""),
+                    })
+                if len(results) >= max_results:
+                    break
+
+            logger.info(f"SearXNG 이미지 검색 완료 — {len(results)}건 수신")
+            return results
+
+        except httpx.ConnectError as e:
+            raise RuntimeError(
+                f"SearXNG 서버에 연결할 수 없음. (주소: {SEARXNG_BASE_URL})"
+            ) from e
+        except Exception as e:
+            raise RuntimeError(f"SearXNG 이미지 검색 실패: {e}") from e
 
     # ------------------------------------------------------------------
     # 유틸 메서드 — 취소 감지

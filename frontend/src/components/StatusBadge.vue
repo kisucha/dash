@@ -1,5 +1,5 @@
 <!-- StatusBadge.vue — 작업 상태를 색상 배지로 표시하는 공통 컴포넌트 -->
-<!-- props: status (PENDING/RUNNING/DONE/FAILED/CANCELLED) -->
+<!-- props: status (PENDING/RUNNING/DONE/FAILED/CANCELLED/WAITING/PENDING_APPROVAL) -->
 <script setup>
 import { computed } from 'vue'
 
@@ -18,6 +18,8 @@ const labelMap = {
   DONE: '완료',
   FAILED: '실패',
   CANCELLED: '취소됨',
+  WAITING: '입력 대기',
+  PENDING_APPROVAL: '승인 대기',
 }
 
 // 상태별 CSS 클래스 매핑
@@ -27,6 +29,8 @@ const classMap = {
   DONE: 'badge-done',
   FAILED: 'badge-failed',
   CANCELLED: 'badge-cancelled',
+  WAITING: 'badge-waiting',
+  PENDING_APPROVAL: 'badge-approval',
 }
 
 // 현재 status에 맞는 라벨 계산
@@ -78,5 +82,17 @@ const badgeClass = computed(() => classMap[props.status] ?? '')
 .badge-cancelled {
   background: #ffedd5;
   color: #9a3412;
+}
+
+/* WAITING — 보라색 (사용자 입력 대기) */
+.badge-waiting {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+/* PENDING_APPROVAL — 노란색 */
+.badge-approval {
+  background: #fef9c3;
+  color: #854d0e;
 }
 </style>

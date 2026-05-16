@@ -134,3 +134,84 @@ export const predownloadF003Loras = () => api.post('/api/features/f003/loras/pre
 
 // F003 ComfyUI 설치 모델 목록 조회 — checkpoints, vaes, loras, clips
 export const getF003Models = () => api.get('/api/features/f003/models')
+
+// ────────────────────────────────────────────────
+// F001 API — 유튜브 컨텐츠 제작 파이프라인
+// ────────────────────────────────────────────────
+
+// F001 작업 목록 조회 (cursor 기반 페이징)
+export const getF001Jobs = (limit = 20, cursor = null, status = null) =>
+  api.get('/api/f001/jobs', {
+    params: {
+      limit,
+      ...(cursor != null ? { cursor } : {}),
+      ...(status ? { status } : {}),
+    }
+  })
+
+// F001 작업 단건 조회 (스테이지 포함)
+export const getF001Job = (jobId) => api.get(`/api/f001/jobs/${jobId}`)
+
+// F001 새 작업 생성
+export const createF001Job = (params) => api.post('/api/f001/jobs', params)
+
+// F001 스테이지 재시도
+export const retryF001Stage = (jobId, stageId, overrideParams = null) =>
+  api.post(`/api/f001/jobs/${jobId}/stages/${stageId}/retry`, { override_params: overrideParams })
+
+// F001 스테이지 반송
+export const rejectF001Stage = (jobId, stageId, reason, rejectionTarget = null) =>
+  api.post(`/api/f001/jobs/${jobId}/stages/${stageId}/reject`, {
+    rejection_reason: reason,
+    rejection_target: rejectionTarget,
+  })
+
+// F001 업로드 승인
+export const approveF001Job = (jobId, finalMeta = {}) =>
+  api.post(`/api/f001/jobs/${jobId}/approve`, finalMeta)
+
+// F001 주제 선택
+export const selectF001Topic = (jobId, topicRank, title) =>
+  api.post(`/api/f001/jobs/${jobId}/topics/${topicRank}/select`, { selected_topic_title: title })
+
+// F001 작업 삭제 (hard delete)
+export const deleteF001Job = (jobId) => api.delete(`/api/f001/jobs/${jobId}`)
+
+// F001 레거시 이력 조회 (기존 tasks 테이블 F001 항목)
+export const getF001Legacy = (limit = 20, cursor = null) =>
+  api.get('/api/f001/legacy', { params: { limit, ...(cursor != null ? { cursor } : {}) } })
+
+// YouTube API 일일 사용량 조회
+export const getYoutubeQuota = () => api.get('/api/f001/youtube/quota')
+
+// ────────────────────────────────────────────────
+// F004 API — 유튜브 컨텐츠 제작 V2 파이프라인
+// ────────────────────────────────────────────────
+
+export const getF004Jobs = (limit = 20, cursor = null, status = null) =>
+  api.get('/api/f004/jobs', {
+    params: {
+      limit,
+      ...(cursor != null ? { cursor } : {}),
+      ...(status ? { status } : {}),
+    }
+  })
+
+export const getF004Job = (jobId) => api.get(`/api/f004/jobs/${jobId}`)
+export const createF004Job = (params) => api.post('/api/f004/jobs', params)
+export const retryF004Stage = (jobId, stageId, overrideParams = null) =>
+  api.post(`/api/f004/jobs/${jobId}/stages/${stageId}/retry`, { override_params: overrideParams })
+export const rejectF004Stage = (jobId, stageId, reason, rejectionTarget = null) =>
+  api.post(`/api/f004/jobs/${jobId}/stages/${stageId}/reject`, {
+    rejection_reason: reason,
+    rejection_target: rejectionTarget,
+  })
+export const approveF004Job = (jobId, finalMeta = {}) =>
+  api.post(`/api/f004/jobs/${jobId}/approve`, finalMeta)
+export const selectF004Topic = (jobId, topicRank, title) =>
+  api.post(`/api/f004/jobs/${jobId}/topics/${topicRank}/select`, { selected_topic_title: title })
+export const deleteF004Job = (jobId) => api.delete(`/api/f004/jobs/${jobId}`)
+
+// F004 스크립트 수정 후 TTS부터 재생성 — script_text 필수, slides 선택
+export const rerunF004FromTTS = (jobId, payload) =>
+  api.post(`/api/f004/jobs/${jobId}/rerun-from-tts`, payload)

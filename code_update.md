@@ -1,5 +1,58 @@
 # Dash 변경 이력
 
+## [2026-05-12] Python 3.11 전환, 오케스트레이터 commit 버그 수정, 시작 복구 로직 추가
+
+- 변경 내용:
+  - `start.ps1` — `py -m uvicorn` → `py -3.11 -m uvicorn` (64-bit Python 3.11 사용)
+  - Python 3.11 의존성 설치 — fastapi, uvicorn, aiosqlite, apscheduler, httpx, python-dotenv, trafilatura, beautifulsoup4
+  - `backend/main.py` — `_restore_f001_running_jobs()` 함수 추가
+    - 서버 시작 시 status=RUNNING인 content_jobs를 조회해 오케스트레이터 재기동
+    - 중단된 RUNNING 스테이지를 PENDING으로 리셋 후 재실행 보장
+    - lifespan 함수에서 `_cleanup_stale_running_tasks()` 바로 뒤에 호출
+  - `pipelines/f001_youtube/orchestrator.py` — `conn.commit()` 누락 버그 3곳 수정
+    - REJECTED → WAITING 전환 후 commit 없이 return → connection 닫힐 때 롤백 → RUNNING 유지
+    - FAILED 상태 기록 후 commit 누락
+    - 최종 DONE/PENDING_APPROVAL 상태 기록 후 commit 누락
+
+- 변경 이유:
+  1. 백엔드가 32-bit Python 3.10으로 실행되어 orchestrator 서브프로세스도 3.10으로 기동 → httpx 없음으로 크래시
+  2. `_db_update()` 헬퍼가 commit 안 함(설계상 의도) → 각 종료 경로에서 명시적 commit 필요했으나 누락
+  3. 서버 재시작 시 RUNNING 상태 job의 오케스트레이터가 복구되지 않는 문제
+
+- 영향 범위:
+  - `start.ps1` 1줄 수정
+  - `backend/main.py` — 함수 1개 추가, lifespan 1줄 추가
+  - `pipelines/f001_youtube/orchestrator.py` — commit 3곳 추가
+
+---
+
+## [2026-05-12] F001 6단계 파이프라인 설계 문서 작성 및 start.ps1 수정
+
+- 변경 내용:
+  - `start.ps1` — `python` → `py` 명령어 교체 (Python launcher 사용)
+  - `RESEARCH.md` — F001 유튜브 AI 자동화 파이프라인 리서치 V2 → V3 작성 (전체 신규)
+    - 현재 시스템 분석, 6스테이지 목표 아키텍처, DB 스키마 변경 계획
+    - 6가지 미결 사항 전부 결정 완료로 전환
+    - 섹션 9(TTS 단계별 전환 전략), 섹션 10(레거시 하이브리드 전환 계획) 신규 추가
+  - `PLAN.md` — F001 6단계 구현 계획 V1 신규 작성 (1619줄)
+    - 섹션 0~12: 파일 목록(21개 신규), DB 스키마, API 14개, cursor 페이징, 파이프라인 구조
+    - 6개 스테이지 코드 스니펫 (validate_input/execute/validate_output 패턴)
+    - Phase 1~5 구현 순서, 트레이드오프, 미결 사항
+    - 독립 검증 후 3개 누락 항목 수정 (run_orchestrator.py, migrate_legacy.py 파일 목록 추가, BasePipeline 시그니처 불일치 명시)
+  - `PLAN.md` 오염 제거 — 하위 첨부된 구 F003-V2 계획 내용(938줄) 삭제
+
+- 변경 이유:
+  1. `python` 명령어가 Windows PATH에 미등록 → Python Launcher(`py`) 사용으로 해결
+  2. F001 유튜브 컨텐츠 제작 기능을 6단계 멀티스테이지 파이프라인으로 고도화 계획 수립
+  3. Ollama도 PATH 미등록 상태 확인 → `%LOCALAPPDATA%\Programs\Ollama\` 경로 확인, 영구 등록 방법 안내
+
+- 영향 범위:
+  - `start.ps1` 1줄 수정
+  - `RESEARCH.md` 전체 교체 (V3)
+  - `PLAN.md` 신규 생성 (1619줄, 구 F003 내용 제거)
+
+---
+
 | 필드 | 내용 |
 |------|------|
 | 문서명 | code_update.md |
@@ -582,3 +635,353 @@
   - Frontend: api/index.js (+1 함수), F003View.vue (폼 구조 확대, LoRA 강도 슬라이더 추가)
 
 - 담당 에이전트: api-builder, pipeline-builder, web-builder
+
+---
+
+## [2026-05-12] 컴퓨터 복원 후 개발 환경 재구축
+
+- 변경 내용:
+  - Windows 정션(Junction) 2개 생성:
+    - `C:\Develop\Dash` → `E:\Dash` (프로젝트 경로 리다이렉트)
+    - `C:\ComfyUI` → `D:\ComfyUI` (ComfyUI 설치 경로 리다이렉트)
+  - 사용자 PATH 환경변수 등록:
+    - `C:\Users\kisucha\AppData\Local\Programs\Python\Python310-32` (Python 3.10 32비트)
+    - `C:\Program Files\nodejs` (Node.js)
+  - Python PATH 우선순위 조정: WindowsApps 별칭을 Python 경로 뒤로 이동
+  - Python 패키지 설치 (`requirements.txt` 기준):
+    - greenlet C 컴파일 불가(32비트 바이너리 미존재) → `sqlalchemy --no-deps` 설치
+    - httptools 빌드 불가 → `fastapi --no-deps` + `uvicorn` (standard 제외) 설치로 우회
+    - 기타 패키지 정상 설치 완료
+  - git 전역 사용자 설정: `user.email = kisucha74@gmail.com`, `user.name = kisuc`
+  - PowerShell 실행 정책: CurrentUser 범위에서 `RemoteSigned` 설정
+  - 미커밋 변경사항 20개 파일 커밋 (F003 파이프라인 고도화 관련) 및 Gitea 서버 푸시 완료
+
+- 변경 이유:
+  - 이전 컴퓨터 고장으로 백업 복원 후 프로젝트 경로가 `C:\Develop\Dash` → `E:\Dash`로 변경됨
+  - 소스 코드 3곳의 하드코딩된 경로(`C:\Develop\Dash`, `C:\ComfyUI`)를 건드리지 않고 Windows 정션으로 리다이렉트 처리
+  - Python 3.10 32비트 환경에서 greenlet, httptools 등 C 바이너리 바퀴 미존재로 인한 설치 오류 `--no-deps` 우회로 해결
+
+- 영향 범위:
+  - OS 환경 변수 및 정션 설정만 변경 (소스 코드 0줄 수정)
+  - 프로젝트 소스 무수정 원칙 유지
+
+- 잔여 이슈:
+  - `start.ps1` 실행 시 PATH 임시 적용 필요:
+    ```powershell
+    $env:PATH = "C:\Users\kisucha\AppData\Local\Programs\Python\Python310-32;C:\Program Files\nodejs;$env:PATH"
+    ```
+    원인: `start.ps1`이 `Start-Process powershell`로 자식 창 spawn 시 부모 세션 in-memory PATH 상속 제약 → 영구 PATH 등록으로도 자식 프로세스가 이를 인식 못함. 다음 세션에서 script 수정으로 해결 필요.
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-16] F004 유튜브 컨텐츠 제작 V2 — PPT 슬라이드 파이프라인 구현
+
+- 변경 내용:
+
+### 신규 파일 (파이프라인 모듈)
+- `pipelines/f004_youtube_v2/__init__.py` — 패키지 초기화
+- `pipelines/f004_youtube_v2/pipeline.py` — F004Pipeline 클래스 정의
+- `pipelines/f004_youtube_v2/orchestrator.py` — F004Orchestrator (6스테이지 순차 실행)
+  - `_load_config()` 헬퍼 추가 (config.json 동적 로드)
+  - STAGE_04 입력: slides/scenes 이중 키, slide_theme, slide_font_path 전달
+  - STAGE_06 입력: script_text 키 사용 (script 키 제거 — STAGE_02 출력과 일치)
+- `pipelines/f004_youtube_v2/run_orchestrator.py` — subprocess 진입점
+- `pipelines/f004_youtube_v2/config.json` — slide_theme, slide_font_path 포함, comfyui 키 제거
+- `pipelines/f004_youtube_v2/stages/__init__.py` — BaseStage, ValidationResult 인터페이스
+- `pipelines/f004_youtube_v2/stages/stage01_research.py` — F001에서 복사 (F004 네임스페이스)
+- `pipelines/f004_youtube_v2/stages/stage02_script.py` — 완전 재구현
+  - slides 배열 출력 (type/title/bullets/narration/source 필드)
+  - script_text 생성 (STAGE_03 TTS 연결)
+  - JSON 파싱 3단계 폴백
+- `pipelines/f004_youtube_v2/stages/stage03_tts.py` — F001에서 복사
+- `pipelines/f004_youtube_v2/stages/stage04_video.py` — 완전 재구현
+  - ComfyUI 제거, Pillow SlideRenderer 구현
+  - slides/scenes 이중 키 지원
+  - SlideRenderer: custom_font_path 주입, _font() 헬퍼 (전역 변수 오염 방지)
+  - clips 출력에 narration 필드 포함 (STAGE_05 비례 배분용)
+  - 3가지 테마: dark_blue, dark_green, corporate
+- `pipelines/f004_youtube_v2/stages/stage05_edit.py` — F001에서 복사 후 수정
+  - _distribute_duration_by_narration() 추가 (2-pass 비례 배분, 총합=audio_duration 보장)
+  - validate_output() 추가 (video_file_path 파일 존재 확인)
+  - _get_video_duration(): try/finally로 clip.close() 보장
+- `pipelines/f004_youtube_v2/stages/stage06_upload.py` — F001에서 복사 후 수정
+  - DB_PATH: 하드코드 제거 → Path(__file__).parent... 동적 경로
+  - hook_preview: script_data.get("hook") → script_text[:200] 수정
+- `pipelines/f004_youtube_v2/validators/__init__.py` — 검증 모듈 초기화
+- `pipelines/f004_youtube_v2/validators/stage_validator.py` — 스테이지 검증 로직
+
+### 신규 파일 (백엔드)
+- `backend/schemas/f004.py` — F004 Pydantic 스키마
+- `backend/services/f004_service.py` — F004Service (CRUD + subprocess 관리)
+- `backend/routers/f004.py` — /api/f004/* 엔드포인트 (14개)
+
+### 수정 파일 (백엔드)
+- `backend/main.py`:
+  - f004 라우터 등록
+  - `_restore_f004_running_jobs()` 함수 추가 (서버 시작 시 F004 복구)
+  - `/results/f004` StaticFiles 마운트
+- `backend/routers/features.py` — F004 "유튜브 컨텐츠 제작 V2" 항목 추가
+
+### 신규 파일 (프론트엔드)
+- `frontend/src/store/f004.js` — useF004Store (Pinia)
+- `frontend/src/views/F004View.vue` — F004 작업 목록 뷰
+- `frontend/src/views/F004JobDetailView.vue` — F004 작업 상세 뷰
+
+### 수정 파일 (프론트엔드)
+- `frontend/src/router/index.js`:
+  - `/features/F004` → F004View 라우트 추가
+  - `/f004/jobs/:jobId` → F004JobDetailView 라우트 추가
+- `frontend/src/api/index.js`:
+  - F004 API 함수 8개 추가 (getF004Jobs, getF004Job, createF004Job, retryF004Stage, rejectF004Stage, approveF004Job, selectF004Topic, getF004Legacy)
+- `frontend/src/views/DashboardView.vue`:
+  - feature_id 컬럼 추가 (F001/F003/F004 등 구분 표시)
+  - F004 작업 필터링 및 라우팅 추가
+
+- 변경 이유:
+  1. F001 유튜브 파이프라인을 F004로 복사하여 새 기능 구현 (코드 재사용)
+  2. ComfyUI 이미지 생성 방식 → Pillow 기반 PPT 슬라이드 렌더링으로 차별화
+  3. 대시보드에 feature_id 표시로 업무 유형 시각화 강화
+- 영향 범위:
+  - 신규 파일 18개 (pipelines/f004 전체, backend schemas/services/routers, frontend store/views)
+  - 수정 파일 5개 (backend main/routers/features, frontend router/api/views)
+- Critic 검토 결과:
+  - 1차: 70/100 (FAIL) — High 3건(비례배분 총합초과, validate_output 누락, script 키 오류) 수정 필요
+  - 2차: 93/100 (FAIL) — Medium 1건(FONT_CANDIDATES 전역 오염), Low 2건 수정 필요
+  - 3차: 99/100 (PASS) — Low 1건 잔존, 97점 기준 통과
+- 담당 에이전트: pipeline-builder (f004 파이프라인), api-builder (백엔드), web-builder (프론트엔드), critic (검증)
+
+---
+
+## [2026-05-14 오후] F001 영상 길이 버그 수정 — 씬 수 자동 산정 + 오디오 기준 클립 재배분
+
+- 변경 내용:
+
+### STAGE_02 스크립트 생성 개선
+- `pipelines/f001_youtube/stages/stage02_script.py`
+  - 씬 수 자동 산정: `n_scenes_target = max(8, int(round(duration_min * 60 / 25)))`
+    - 기준: 씬당 25초 (예: 10분 영상 → 약 24씬 자동 생성)
+  - `script_text_preview` 제한 확대: 2000자 → 5000자 (더 긴 스크립트 미리보기 표시)
+  - 씬 분해 프롬프트 대폭 개선:
+    - 목표 씬 수, 총 seconds, 씬당 초 단위 명시
+    - 씬별 내용 설명 강제 요청
+  - Ollama 파라미터 조정:
+    - `num_predict` 2048 → 4096 (더 많은 씬 생성 허용)
+    - `timeout` 120초 → 180초 (긴 생성 시간 수용)
+  - **씬 파싱 정규화**: 생성된 씬들의 `duration_sec` 합계를 `duration_min × 60`으로 자동 정규화
+    - 문제: 개별 씬 duration 합 ≠ target duration
+    - 솔루션: 전체 씬 개수 유지하며 각 씬의 duration 비례 조정
+
+### STAGE_05 영상 편집 개선
+- `pipelines/f001_youtube/stages/stage05_edit.py`
+  - `_get_audio_duration_sec(path)` 헬퍼 함수 추가:
+    - moviepy 우선 (정확한 오디오 길이 측정)
+    - ffprobe 폴백
+  - `_run_ffmpeg_concat()` 함수 대폭 개선:
+    - 오디오 실제 길이 측정 → 유효 클립 수로 균등 재배분
+    - 재배분 공식: `per_clip_sec = audio_duration / n_valid_clips` (float 정밀도)
+    - PNG 클립 `-t` 값을 재배분된 시간 적용 (`.3f` 포맷)
+    - `-shortest` 플래그 제거 (오디오 기준 클립 재배분으로 불필요해짐)
+  - FFmpeg `timeout` 확대: 300초 → 600초 (긴 영상 처리 수용)
+
+- 변경 이유:
+  1. STAGE_02가 씬을 5~8개×10초=80초만 생성 → 사용자의 `duration_min` 설정과 불일치
+  2. STAGE_05의 `-shortest` 플래그로 클립 합계 시간(1~2분)이 오디오(보통 1분 미만) 길이에 맞춰져서 영상이 비정상적으로 짧아짐
+  3. 근본 원인: TTS 오디오 길이가 예측 불가능하므로 → 오디오 실제 길이 기준으로 클립 배분해야 함
+
+- 영향 범위:
+  - `pipelines/f001_youtube/stages/stage02_script.py` (스크립트 생성 로직)
+  - `pipelines/f001_youtube/stages/stage05_edit.py` (영상 편집 로직)
+
+- 검증:
+  - Python AST 문법 검사 통과 ✓
+  - 씬 수 자동 산정 로직 정상 작동 ✓
+  - 오디오 길이 기준 클립 재배분 알고리즘 정상 작동 ✓
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-14] F001 Stage 결과 UI 개선 — StageResultViewer.vue STAGE_04 썸네일 표시
+
+- 변경 내용:
+  - `frontend/src/components/StageResultViewer.vue` 전면 수정:
+    - computed 추가: `thumbnailPath` (parsedOutput에서 STAGE_04 썸네일 경로 추출)
+    - computed 추가: `thumbnailCandidates` (thumbnail_candidates 배열에서 모든 후보 이미지 추출)
+    - 헬퍼 함수 추가: `f001AssetUrl(absPath)` — Windows 절대 경로(백슬래시 포함)를 `/results/f001/...` URL로 변환
+    - STAGE_04 클립 아이템 개선:
+      - `source` 배지 추가 (img2img=초록, txt2img=파랑)
+      - `caption` 텍스트 필드 조건부 표시
+    - STAGE_04 섹션 하단에 썸네일 섹션 신규 추가:
+      - `thumbnailPath` 있으면 선택된 썸네일 이미지 단독 렌더링 (400px 고정 높이)
+      - `thumbnailCandidates.length > 1`이면 하단에 후보 갤러리 표시 (4열 그리드, 체크마크 오버레이)
+    - CSS 추가 12개 클래스:
+      - `.clip-source-badge`, `.badge-img2img`, `.badge-txt2img` (소스 타입 배지)
+      - `.clip-caption` (캡션 텍스트)
+      - `.thumbnail-section`, `.thumbnail-header`, `.thumbnail-label` (섹션/헤더)
+      - `.thumbnail-img` (메인 썸네일)
+      - `.thumbnail-candidates`, `.thumbnail-candidates-grid`, `.thumbnail-candidate-img` (후보 갤러리)
+
+- 변경 이유:
+  1. STAGE_04에서 생성된 썸네일이 output_json에만 저장되어 대시보드에서 확인 불가능했음
+  2. 사용자가 여러 썸네일 후보 중 최종 선택본을 시각적으로 확인 필요
+  3. P1-P2 개선 작업의 마무리 단계로 영상제작 파이프라인의 중간 결과물 가시화 강화
+
+- 영향 범위:
+  - `frontend/src/components/StageResultViewer.vue` 단일 파일 (computed 2개, 함수 1개, template 재구성, CSS 12개 클래스 추가)
+
+- 검증 완료:
+  - F001 job 상세 페이지에서 STAGE_04 결과 표시 시 썸네일 이미지 렌더링 확인 ✓
+  - 썸네일 후보가 1개 초과일 때 하단 갤러리 표시 확인 ✓
+  - 소스 배지(img2img/txt2img) 색상 분화 확인 ✓
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-13] STAGE_05 FFmpeg 미설치 문제 해결 — moviepy 번들 FFmpeg 사용
+
+- 변경 내용:
+  - `pipelines/f001_youtube/stages/stage05_edit.py` 전면 수정:
+    - FFmpeg 미설치 (WinError 2 "프로그램을 찾을 수 없습니다") 해결을 위해 moviepy 패키지 설치 후 `imageio_ffmpeg` 번들 FFmpeg 경로 사용
+    - 모듈 임포트: `import imageio_ffmpeg as _imageio_ffmpeg` 추가
+    - `_run_ffmpeg_concat()`: `"ffmpeg"` → `_imageio_ffmpeg.get_ffmpeg_exe()` 교체 (subprocess 호출)
+    - `_generate_black_video_with_audio()`: 동일하게 `_imageio_ffmpeg.get_ffmpeg_exe()` 사용
+    - `_get_video_duration()`: ffprobe subprocess 제거 → `moviepy.VideoFileClip` 사용으로 교체 (더 간단)
+  - 패키지 설치: `pip install moviepy` (v2.2.1 자동 설치, imageio-ffmpeg v0.6.0 번들)
+  - **추가 버그 수정**: `n_clips` 계산 오류
+    - 기존 로직: PNG 클립은 6토큰인데 `len(input_args) // 4` 로 잘못 계산
+    - 수정: `_run_ffmpeg_concat()` 루프 내 `n_clips += 1` 카운터로 교체 (정확한 계산)
+
+- 변경 이유:
+  1. Windows 환경에서 FFmpeg이 시스템 PATH에 미등록 → subprocess.run("ffmpeg") 호출 시 WinError 2 발생
+  2. moviepy의 imageio-ffmpeg 패키지가 자동으로 번들 FFmpeg을 제공 → get_ffmpeg_exe() 호출로 경로 확보 가능
+  3. ffprobe 제거로 의존성 줄임 (moviepy만으로 비디오 정보 조회 가능)
+
+- 영향 범위:
+  - `pipelines/f001_youtube/stages/stage05_edit.py` 1개 파일 (함수 3개 수정)
+  - 패키지 추가: moviepy (requirements.txt 추가 필요)
+
+- 검증 완료:
+  - job #12 전체 파이프라인 STAGE_01 ~ STAGE_05 완주 ✓
+  - STAGE_05 output.mp4 생성 (2.35MB, 58.1초 동영상)
+  - STAGE_06 PENDING_APPROVAL (승인 대기 상태)
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-12] F001 유튜브 AI 자동화 파이프라인 — 전체 구현 완료
+
+- 변경 내용:
+
+### 1. 데이터베이스 스키마 확장 (backend/core/database.py)
+- `content_jobs` 테이블 신규 (14컬럼):
+  - id(PK), job_id(UNIQUE), title, channel_id, upload_mode(manual_approval|manual|auto)
+  - created_at, status(PENDING|RUNNING|DONE|FAILED|CANCELLED), error_msg, result_json
+  - selected_topic_id(FK), selected_topic_dict, approved_at, rejected_stage
+- `stages` 테이블 신규 (17컬럼):
+  - id(PK), job_id(FK), stage_id(STAGE_01~STAGE_06), status(PENDING|RUNNING|SKIP|DONE|AWAITING_INPUT|AWAITING_APPROVAL)
+  - input_json, output_json, error_msg, rejection_reason, started_at, ended_at, duration_sec
+- 인덱스 3개 추가: (job_id), (stage_id, status), (status)
+
+### 2. 백엔드 라우터 + API 엔드포인트 (backend/routers/f001.py)
+- 14개 엔드포인트 신규:
+  - POST/GET /api/f001/jobs — 작업 생성/조회
+  - GET /api/f001/jobs?limit=10&cursor=... — cursor 기반 목록 조회
+  - GET /api/f001/jobs/{job_id} — 작업 상세 조회
+  - POST /api/f001/jobs/{job_id}/cancel — 작업 취소
+  - GET /api/f001/jobs/{job_id}/stages — 스테이지 목록
+  - GET /api/f001/jobs/{job_id}/stages/{stage_id} — 스테이지 상세
+  - POST /api/f001/jobs/{job_id}/stages/{stage_id}/retry — 스테이지 재시도
+  - POST /api/f001/jobs/{job_id}/stages/{stage_id}/reject — 스테이지 반송
+  - POST /api/f001/jobs/{job_id}/topics/select — 주제 선택
+  - POST /api/f001/jobs/{job_id}/approve — 작업 승인
+  - GET /api/f001/legacy — 레거시 작업 이력 조회
+  - POST /api/f001/migrate-legacy — 마이그레이션 유틸
+  - GET /api/f001/youtube-quota — YouTube API 할당량 조회
+
+### 3. 백엔드 서비스 계층 (backend/services/f001_service.py)
+- F001Service 클래스 (8개 메서드):
+  - `create_job()` — content_jobs 신규 생성, stages 초기화
+  - `get_job()` / `list_jobs()` — cursor 기반 페이징 (n+1 쿼리 해결)
+  - `cancel_job()` — 진행 중 작업 취소
+  - `get_stage()` / `list_stages()` — 스테이지 조회
+  - `update_stage_status()` — 스테이지 상태 업데이트
+  - `_spawn_orchestrator()` — subprocess로 F001Orchestrator 실행
+
+### 4. 파이프라인 스테이지 모듈 (pipelines/f001_youtube/stages/)
+- 6개 스테이지 모듈 (각 validate_input/execute/validate_output 패턴):
+  1. **stage01_research.py** — SearXNG 트렌드 수집 + Ollama 주제 발굴 (최대 10개) + JSON 파싱 + 폴백
+  2. **stage02_script.py** — Ollama 스크립트 생성 + 자동 씬 분해 (최대 30씬)
+  3. **stage03_tts.py** — Coqui → Kokoro → ElevenLabs → OpenAI 우선순위 TTS + skip 처리
+  4. **stage04_video.py** — ComfyUI 이미지 생성 + text_slide/script_only skip 옵션 + PIL 슬라이드 생성
+  5. **stage05_edit.py** — FFmpeg concat + Whisper 자막 생성 + BGM 믹싱
+  6. **stage06_upload.py** — Ollama SEO 메타데이터 생성 + YouTube 업로드 준비 (OAuth Phase 5)
+- 공통 인터페이스: BaseStage, ValidationResult
+
+### 5. 파이프라인 오케스트레이터 (pipelines/f001_youtube/orchestrator.py)
+- F001Orchestrator(BasePipeline) 클래스:
+  - `run()` — 6스테이지 순차 실행, skip 체인 처리
+  - `_get_stage_input()` — 이전 스테이지 output → 현재 input 변환
+  - `_handle_skip_chain()` — skip된 스테이지의 후행 스테이지 자동 skip
+  - `_run_stage_by_id()` — 개별 스테이지 실행 + 예외 처리
+  - `_get_stage_output()` — 스테이지별 결과 추출
+
+### 6. 파이프라인 진입점 (pipelines/f001_youtube/run_orchestrator.py)
+- subprocess 진입점: argv[1]=job_id → F001Orchestrator 인스턴스화 → run()
+- 레거시: pipelines/f001_youtube/migrate_legacy.py (tasks → content_jobs 마이그레이션)
+- 설정: pipelines/f001_youtube/config.json (ComfyUI/TTS/Whisper 경로 + 모델)
+
+### 7. 프론트엔드 상태 관리 (frontend/src/store/f001.js)
+- useF001Store (Pinia):
+  - 상태: jobs, currentJob, legacyJobs, cursor, hasMore, loading
+  - 액션 8개: fetchJobs, fetchJobDetail, createJob, retryStage, rejectStage, approveJob, selectTopic, fetchLegacy
+
+### 8. 프론트엔드 컴포넌트 (frontend/src/components/)
+- **StageTimeline.vue** — 6단계 세로 타임라인 (상태 아이콘, 뱃지, 재시도/반송 버튼)
+- **StageResultViewer.vue** — 스테이지별 결과 뷰어:
+  - STAGE_01: 주제 카드 (선택 라디오버튼)
+  - STAGE_02: 스크립트 (마크다운 렌더링)
+  - STAGE_03: 오디오 플레이어
+  - STAGE_04: 클립 그리드 (이미지 미리보기)
+  - STAGE_05: 비디오 플레이어
+  - STAGE_06: SEO 메타데이터 폼
+
+### 9. 프론트엔드 페이지 뷰 (frontend/src/views/)
+- **F001View.vue** — F001 메인 페이지:
+  - 작업 목록 테이블 (상태, 제목, 생성일, 액션 버튼)
+  - 4단계 작업 생성 모달 (채널 선택 → 주제 → 옵션 → 미리보기)
+  - 레거시 이력 토글
+- **F001JobDetailView.vue** — 작업 상세:
+  - 2패널 레이아웃 (왼쪽: 타임라인, 오른쪽: 결과 뷰어)
+  - RUNNING 상태 2초 자동 폴링
+  - PENDING_APPROVAL 배너 + 승인/거절 버튼
+
+### 10. 라우팅 + API (backend/main.py, frontend/router, api/index.js)
+- `backend/main.py`:
+  - f001 라우터 등록
+  - `/results/f001` StaticFiles 마운트 (생성된 영상/이미지 제공)
+- `frontend/src/router/index.js`:
+  - `/features/F001` → F001View
+  - `/f001/jobs/:jobId` → F001JobDetailView
+- `frontend/src/api/index.js`:
+  - 9개 API 함수 (getF001Jobs, getF001Job, createF001Job, retryF001Stage, rejectF001Stage, approveF001Job, selectF001Topic, getF001Legacy, getYoutubeQuota)
+
+- 변경 이유:
+  1. F001 유튜브 컨텐츠 제작을 6단계 멀티스테이지 파이프라인으로 구현 — 각 단계 독립 실행, 유효성 검증, 반송 지원
+  2. 기존 `tasks` 테이블 무변경 유지 — F001 전용 `content_jobs`/`stages` 독립 테이블로 복잡도 분리
+  3. PENDING_APPROVAL 상태 추가 — 사용자가 각 단계 결과 검토 후 승인/거절 선택 가능
+
+- 영향 범위:
+  - 신규 생성 파일 21개 (schemas, services, routers, pipelines/f001 전체, frontend 컴포넌트 3개, views 2개)
+  - 수정 파일 5개 (database.py, main.py, router/index.js, DashboardView.vue, api/index.js)
+
+- 검증 완료:
+  - Python AST 구문 검사 17/17 파일 전체 통과 (0 오류)
+  - PLAN.md Phase 1~4 완료 표시, Phase 5 부분완료 표시
+  - select_topic API: dict 버그 수정 완료
+  - F001View default upload_mode: 'manual'→'manual_approval' 수정 완료
+
+- 담당 에이전트: api-builder (Phase 1), pipeline-builder (Phase 2-4), web-builder (Phase 5-6), historian (최종 검증)

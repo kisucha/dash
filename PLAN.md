@@ -1,135 +1,1330 @@
-# Dash F003 영상제작 구현 계획
+# F001 유튜브 AI 자동화 파이프라인 구현 계획
 
 | 필드 | 내용 |
 |------|------|
-| 문서명 | Dash F003 영상제작 구현 계획 |
+| 문서명 | F001 유튜브 AI 자동화 파이프라인 구현 계획 |
 | 버전 | V1 |
-| 날짜 | 2026-05-07 |
-| 작성자 | Claude (kisuc 승인) |
+| 날짜 | 2026-05-12 |
+| 작성자 | claude-sonnet-4-6 |
 | 문서 유형 | 구현 계획 |
 | 모델 | claude-sonnet-4-6 |
 
 ---
 
-## 1. 구현 범위 및 전제조건
+## 목차
 
-### 1-1. 구현 범위
-
-이 문서는 다음 두 가지 목표를 동시에 달성하기 위한 구현 계획을 기술한다.
-
-1. **인풋(cursor) 기반 페이징 전환**: 기존 오프셋 페이징을 cursor 기반 페이징으로 교체
-2. **F003 영상제작 파이프라인 추가**: ComfyUI + AnimateDiff/Flux.1 기반 동영상·그림 생성 기능
-
-### 1-2. 기술 스택 전제조건
-
-| 서비스 | 포트 | 역할 | 전제조건 |
-|--------|------|------|---------|
-| FastAPI | 8000 | Dash 메인 API | 현재 운영 중 |
-| Vue 3 (dev) | 5173 | 프론트엔드 | 현재 운영 중 |
-| Ollama | 11434 | 로컬 LLM | 현재 운영 중 |
-| ComfyUI | 8188 | 이미지/동영상 생성 단일 플랫폼 | 별도 설치 필요 |
-| SQLite | - | aiosqlite 기반 | 현재 운영 중 |
-
-### 1-3. 외부 의존성 전제조건
-
-- **ComfyUI**: 포트 8188에서 실행 중이어야 함
-- **ComfyUI-Manager**: POST /manager/reboot 사용을 위해 설치 필요
-- **ComfyUI-AnimateDiff-Evolved**: 동영상 경로에 필수 (`Kosinkadink/ComfyUI-AnimateDiff-Evolved`)
-- **ComfyUI-VideoHelperSuite**: MP4 출력에 필요 (`Kosinkadink/ComfyUI-VideoHelperSuite`)
-- **CivitAI API 키**: 모델 다운로드에 필요 (`.env`에 `CIVITAI_API_KEY` 추가)
-- **HuggingFace Token**: Flux.1 공식 레포 다운로드 시 필요 (`.env`에 `HF_TOKEN` 추가)
-
-### 1-4. 현재 코드베이스 핵심 파악
-
-- `pipelines/runner.py`: F001, F002 레지스트리 → F003 추가 필요
-- `pipelines/base.py`: DB_PATH 하드코딩 `r"C:\Develop\Dash\storage\dash.db"`, 동기 sqlite3 사용
-- `backend/core/database.py`: `init_db()`에서 3개 테이블 생성 → 2개 테이블 추가 필요
-- `backend/routers/features.py`: FEATURES 딕셔너리 하드코딩 → F003 항목 추가 필요
-- `storage/`: `results/f003/` 서브디렉토리 신규 생성 필요
+0. 구현 범위 요약
+1. DB 스키마 변경 계획
+2. 백엔드 API 추가 계획
+3. cursor 기반 페이징 설계
+4. 파이프라인 구조 재설계
+5. 스테이지별 구현 상세
+6. 프론트엔드 변경 계획
+7. 스토리지 구조
+8. 레거시 F001 하이브리드 처리
+9. 외부 서비스 설치/설정 계획
+10. 구현 순서 (Phase별)
+11. 트레이드오프 및 리스크
+12. 미결/보류 사항
 
 ---
 
-## 2. 인풋(cursor) 기반 페이징 전환 계획
+## 섹션 0. 구현 범위 요약
 
-### 2-1. 오프셋 페이징의 문제점
+### 신규 생성 파일
 
-현재 구현(`OFFSET N` 방식)의 구조적 문제:
+| 경로 | 설명 |
+|------|------|
+| `backend/routers/f001.py` | F001 전용 API 라우터 |
+| `backend/schemas/f001.py` | F001 Pydantic 스키마 |
+| `backend/services/f001_service.py` | content_jobs / stages CRUD 서비스 |
+| `pipelines/f001_youtube/orchestrator.py` | 6스테이지 오케스트레이터 |
+| `pipelines/f001_youtube/stages/__init__.py` | 스테이지 패키지 초기화 |
+| `pipelines/f001_youtube/stages/stage01_research.py` | 주제 발굴 스테이지 |
+| `pipelines/f001_youtube/stages/stage02_script.py` | 스크립트 생성 스테이지 |
+| `pipelines/f001_youtube/stages/stage03_tts.py` | TTS 보이스오버 스테이지 |
+| `pipelines/f001_youtube/stages/stage04_video.py` | 영상/이미지 생성 스테이지 |
+| `pipelines/f001_youtube/stages/stage05_edit.py` | 영상 편집 스테이지 |
+| `pipelines/f001_youtube/stages/stage06_upload.py` | SEO + YouTube 업로드 스테이지 |
+| `pipelines/f001_youtube/validators/__init__.py` | 검증기 패키지 초기화 |
+| `pipelines/f001_youtube/validators/stage_validator.py` | 스테이지 결과 검증 클래스 |
+| `pipelines/f001_youtube/config.json` | F001 설정 파일 (ComfyUI 경로 등) |
+| `pipelines/f001_youtube/run_orchestrator.py` | subprocess 진입점 (argv[1]=job_id) |
+| `pipelines/f001_youtube/migrate_legacy.py` | 레거시 tasks → content_jobs 마이그레이션 유틸 |
+| `frontend/src/views/F001View.vue` | F001 메인 화면 |
+| `frontend/src/views/F001JobDetailView.vue` | 스테이지 타임라인 상세 |
+| `frontend/src/components/StageTimeline.vue` | 스테이지 진행 현황 컴포넌트 |
+| `frontend/src/components/StageResultViewer.vue` | 스테이지 결과 표시 컴포넌트 |
+| `frontend/src/store/f001.js` | F001 전용 Pinia 스토어 |
 
-- **실시간 불안정성**: 새 task가 생성되면 기존 offset 기준이 밀려 페이지 경계가 뒤틀림. 10초 폴링 중 신규 task가 삽입되면 같은 항목이 두 번 보이거나 항목이 빠질 수 있음
-- **COUNT(\*) 오버헤드**: 매 요청마다 `SELECT COUNT(*)` 별도 쿼리 실행
-- **대용량 비효율**: `OFFSET N`은 N개 행을 스캔 후 버림. task가 수천 건 이상이면 느려짐
+### 수정 파일
 
-### 2-2. Cursor 기반 페이징 설계 원칙
+| 경로 | 변경 내용 |
+|------|----------|
+| `backend/core/database.py` | `content_jobs`, `stages` 테이블 추가 |
+| `backend/main.py` | f001 라우터 등록 (`from routers import ..., f001` 한 줄 추가 + `app.include_router(f001.router)`), F001 결과 StaticFiles 마운트 추가 |
+| `frontend/src/router/index.js` | F001View, F001JobDetailView 라우트 추가 |
+| `frontend/src/views/DashboardView.vue` | F001 클릭 시 F001Feature 라우팅 추가 |
+| `frontend/src/api/index.js` | F001 API 함수 추가 |
 
-- **cursor**: 마지막으로 받은 task의 정수 `id`를 cursor로 사용
-- **첫 페이지**: cursor 파라미터 없이 요청 (또는 null)
-- **다음 페이지**: 응답의 `next_cursor`를 다음 요청의 cursor로 사용
-- **`total` 제거**: `has_more` + `next_cursor`로 대체
-- **`LIMIT limit+1` 트릭**: 실제 필요한 수보다 1개 더 조회하여 다음 페이지 존재 여부 판단
+### 삭제 파일
+없음 (기존 F001 레거시 pipeline.py 유지)
 
-### 2-3. SQL 쿼리 변경
+### 영향받는 기존 파일 (직접 수정 없음, 동작 확인 필요)
 
-```sql
--- 첫 페이지 (cursor 없음)
-SELECT * FROM tasks
-[WHERE feature_id = ?]
-ORDER BY id DESC
-LIMIT ?  -- limit+1
+- `pipelines/runner.py` — F001_MULTI 또는 별도 orchestrator runner 추가 검토 필요
+- `pipelines/f001_youtube/pipeline.py` — 레거시 유지
+- `pipelines/f003_video_creation/comfyui_client.py` — STAGE_04에서 재활용 (import만)
 
--- 다음 페이지 (cursor 있음)
-SELECT * FROM tasks
-WHERE id < ?           -- cursor (마지막 수신 id)
-[AND feature_id = ?]
-ORDER BY id DESC
-LIMIT ?  -- limit+1
-```
+---
 
-결과가 limit+1개이면 `has_more=True`, 마지막 항목을 제거하고 제거 전 마지막 항목의 id를 `next_cursor`로 반환.
+## 섹션 1. DB 스키마 변경 계획
 
-### 2-4. 변경 파일 목록 및 코드 스니펫
+### 현재 테이블 구조 확인
 
-**A. `backend/schemas/task.py` — TaskListResponse 변경**
+`backend/core/database.py` 분석 결과:
+- `tasks` — 기존 단일 파이프라인 작업 (F001/F002/F003 공용)
+- `schedules` — 스케줄 관리
+- `settings` — key-value 설정
+- `model_inventory` — F003 모델 인벤토리
+- `model_download_queue` — F003 모델 다운로드 큐
+
+**기존 테이블 변경 없음** — tasks 테이블은 F002, F003이 그대로 사용하므로 수정하지 않는다.
+
+### 추가 테이블 1: `content_jobs`
+
+F001 멀티스테이지 작업 단위. 하나의 유튜브 영상 제작 프로젝트에 해당한다.
 
 ```python
-# 변경 전
-class TaskListResponse(BaseModel):
-    total: int
-    items: list[TaskResponse]
+# backend/core/database.py 추가 내용 (SQLite DDL 스타일)
 
-# 변경 후
-class TaskListResponse(BaseModel):
-    items: list[TaskResponse]
-    next_cursor: int | None      # None이면 마지막 페이지
+_CREATE_CONTENT_JOBS = """
+CREATE TABLE IF NOT EXISTS content_jobs (
+    id                INTEGER  PRIMARY KEY AUTOINCREMENT,
+    feature_id        TEXT     NOT NULL DEFAULT 'F001',
+    -- 작업 전체 상태: PENDING/RUNNING/DONE/FAILED/CANCELLED/PENDING_APPROVAL
+    status            TEXT     NOT NULL DEFAULT 'PENDING',
+    channel_category  TEXT,                        -- 채널 카테고리 (예: IT/기술)
+    initial_params    TEXT,                        -- 최초 입력 파라미터 JSON
+    current_stage     TEXT,                        -- 현재 실행 중 스테이지 ID
+    -- 업로드 방식: manual_approval(기본)/auto
+    upload_mode       TEXT     NOT NULL DEFAULT 'manual_approval',
+    created_at        DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at        DATETIME,
+    finished_at       DATETIME,
+    triggered_by      TEXT     NOT NULL DEFAULT 'manual',
+    youtube_video_id  TEXT,                        -- 업로드 완료 후 YouTube 영상 ID
+    notes             TEXT,                        -- 관리자 메모 (승인 흐름용)
+    -- 기존 tasks 테이블 연동용 (마이그레이션 시 원본 task id 보존)
+    legacy_task_id    INTEGER
+)
+"""
+
+-- 인덱스: feature_id + status 복합 조건 조회 최적화
+_CREATE_IDX_CONTENT_JOBS = """
+CREATE INDEX IF NOT EXISTS idx_content_jobs_feature_status
+ON content_jobs(feature_id, status)
+"""
+```
+
+**컬럼 타입/기본값/제약조건 요약:**
+
+| 컬럼 | 타입 | 기본값 | 제약 | 비고 |
+|------|------|--------|------|------|
+| id | INTEGER | - | PK AUTOINCREMENT | |
+| feature_id | TEXT | 'F001' | NOT NULL | F001 고정 |
+| status | TEXT | 'PENDING' | NOT NULL | 6가지 상태 |
+| channel_category | TEXT | NULL | - | STAGE_01 입력 |
+| initial_params | TEXT(JSON) | NULL | - | 전체 입력 파라미터 |
+| current_stage | TEXT | NULL | - | 현재 실행 중 스테이지 |
+| upload_mode | TEXT | 'manual_approval' | NOT NULL | auto/manual_approval |
+| created_at | DATETIME | CURRENT_TIMESTAMP | - | |
+| started_at | DATETIME | NULL | - | 첫 스테이지 시작 시각 |
+| finished_at | DATETIME | NULL | - | 전체 완료 시각 |
+| triggered_by | TEXT | 'manual' | NOT NULL | manual/schedule |
+| youtube_video_id | TEXT | NULL | - | 업로드 후 채워짐 |
+| notes | TEXT | NULL | - | 관리자 메모 |
+| legacy_task_id | INTEGER | NULL | - | 레거시 연동용 FK |
+
+### 추가 테이블 2: `stages`
+
+스테이지 실행 레코드. content_jobs 1개당 최대 6개 레코드.
+
+```python
+_CREATE_STAGES = """
+CREATE TABLE IF NOT EXISTS stages (
+    id               INTEGER  PRIMARY KEY AUTOINCREMENT,
+    job_id           INTEGER  NOT NULL,            -- content_jobs.id 참조
+    stage_id         TEXT     NOT NULL,            -- STAGE_01_RESEARCH 등
+    stage_order      INTEGER  NOT NULL,            -- 1~6 실행 순서
+    -- 상태: PENDING/RUNNING/DONE/FAILED/REJECTED/SKIPPED
+    status           TEXT     NOT NULL DEFAULT 'PENDING',
+    input_data       TEXT,                         -- 이 스테이지 입력 JSON
+    output_data      TEXT,                         -- 이 스테이지 출력 JSON
+    rejection_reason TEXT,                         -- REJECTED 시 반송 사유
+    rejection_target TEXT,                         -- 반송할 스테이지 ID
+    retry_count      INTEGER  NOT NULL DEFAULT 0,  -- 재시도 횟수
+    skip             INTEGER  NOT NULL DEFAULT 0,  -- skip 여부 (0/1)
+    skip_mode        TEXT,                         -- text_slide/script_only
+    created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+    started_at       DATETIME,
+    finished_at      DATETIME,
+    task_pid         INTEGER                       -- 실행 프로세스 PID (취소용)
+)
+"""
+
+-- 인덱스: job_id 조회(전체 스테이지 목록)와 status 조회 최적화
+_CREATE_IDX_STAGES_JOB   = "CREATE INDEX IF NOT EXISTS idx_stages_job_id ON stages(job_id)"
+_CREATE_IDX_STAGES_STATUS = "CREATE INDEX IF NOT EXISTS idx_stages_status ON stages(status)"
+```
+
+**컬럼 타입/기본값/제약조건 요약:**
+
+| 컬럼 | 타입 | 기본값 | 비고 |
+|------|------|--------|------|
+| id | INTEGER | - | PK AUTOINCREMENT |
+| job_id | INTEGER | - | NOT NULL, content_jobs.id |
+| stage_id | TEXT | - | NOT NULL, STAGE_01_RESEARCH 등 |
+| stage_order | INTEGER | - | NOT NULL, 1~6 |
+| status | TEXT | 'PENDING' | NOT NULL |
+| input_data | TEXT(JSON) | NULL | |
+| output_data | TEXT(JSON) | NULL | |
+| rejection_reason | TEXT | NULL | |
+| rejection_target | TEXT | NULL | |
+| retry_count | INTEGER | 0 | NOT NULL |
+| skip | INTEGER | 0 | NOT NULL, 0=false/1=true |
+| skip_mode | TEXT | NULL | text_slide/script_only |
+| created_at | DATETIME | CURRENT_TIMESTAMP | |
+| started_at | DATETIME | NULL | |
+| finished_at | DATETIME | NULL | |
+| task_pid | INTEGER | NULL | |
+
+### init_db() 수정
+
+```python
+# database.py의 init_db() 함수에 아래 항목 추가
+async def init_db() -> None:
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(_CREATE_TASKS)
+        await conn.execute(_CREATE_SCHEDULES)
+        await conn.execute(_CREATE_SETTINGS)
+        await conn.execute(_CREATE_MODEL_INVENTORY)
+        await conn.execute(_CREATE_MODEL_DOWNLOAD_QUEUE)
+        # F001 멀티스테이지 테이블 추가
+        await conn.execute(_CREATE_CONTENT_JOBS)
+        await conn.execute(_CREATE_STAGES)
+        await conn.execute(_CREATE_IDX_CONTENT_JOBS)
+        await conn.execute(_CREATE_IDX_STAGES_JOB)
+        await conn.execute(_CREATE_IDX_STAGES_STATUS)
+        await conn.commit()
+```
+
+---
+
+## 섹션 2. 백엔드 API 추가 계획
+
+### 신규 라우터: `backend/routers/f001.py`
+
+현재 `tasks.py` 라우터 패턴(`prefix="/api/tasks"`, `aiosqlite.Connection = Depends(get_db)`)을 그대로 적용한다.
+
+### 신규 엔드포인트 전체 목록
+
+| 메서드 | 경로 | 기능 | 상태코드 |
+|--------|------|------|---------|
+| POST | /api/f001/jobs | 새 콘텐츠 작업 생성 + 오케스트레이터 실행 | 201 |
+| GET | /api/f001/jobs | 목록 조회 (cursor 기반 페이징) | 200 |
+| GET | /api/f001/jobs/{job_id} | 단건 조회 (스테이지 목록 포함) | 200 |
+| DELETE | /api/f001/jobs/{job_id} | 작업 취소 (RUNNING → CANCELLED) | 200 |
+| GET | /api/f001/jobs/{job_id}/stages | 스테이지 목록 조회 | 200 |
+| GET | /api/f001/jobs/{job_id}/stages/{stage_id} | 스테이지 단건 조회 | 200 |
+| POST | /api/f001/jobs/{job_id}/stages/{stage_id}/retry | 스테이지 재시도 | 202 |
+| POST | /api/f001/jobs/{job_id}/stages/{stage_id}/reject | 반송 (이전 스테이지로) | 202 |
+| POST | /api/f001/jobs/{job_id}/approve | 업로드 승인 (PENDING_APPROVAL → 업로드) | 202 |
+| GET | /api/f001/jobs/{job_id}/topics | STAGE_01 주제 후보 목록 | 200 |
+| POST | /api/f001/jobs/{job_id}/topics/{topic_rank}/select | 주제 선택 | 200 |
+| GET | /api/f001/youtube/quota | YouTube Data API 사용량 조회 | 200 |
+| GET | /api/f001/legacy | 기존 tasks 테이블 F001 이력 (cursor 페이징) | 200 |
+| POST | /api/f001/migrate-legacy | 레거시 tasks → content_jobs 선택 마이그레이션 | 202 |
+
+### Pydantic 스키마 핵심 구조
+
+```python
+# backend/schemas/f001.py
+
+import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+from datetime import datetime
+from typing import Any, Optional
+from pydantic import BaseModel, Field
+
+
+# -- 작업 생성 요청 스키마 --
+
+class F001JobCreateRequest(BaseModel):
+    """POST /api/f001/jobs 요청 바디."""
+    channel_category: str = Field(..., min_length=1, max_length=100, description="채널 카테고리")
+    target_count: int = Field(default=5, ge=1, le=20, description="주제 후보 개수")
+    search_provider: str = Field(default="youtube+searxng", description="youtube+searxng/searxng")
+    keywords_hint: Optional[str] = Field(default=None, max_length=200, description="추가 키워드 힌트")
+    days: int = Field(default=7, ge=1, le=30, description="트렌드 검색 기간(일)")
+    channel_tone: str = Field(default="educational", description="educational/entertaining/tutorial")
+    duration_min: int = Field(default=10, ge=1, le=60, description="목표 영상 길이(분)")
+    hook_style: str = Field(default="question", description="question/shocking_fact/story")
+    cta_type: str = Field(default="subscribe", description="subscribe/like/comment")
+    tts_provider: str = Field(default="coqui", description="coqui/kokoro/elevenlabs/openai")
+    tts_skip: bool = Field(default=False, description="TTS 건너뛰기")
+    generation_backend: str = Field(default="comfyui", description="comfyui/skip")
+    skip_mode: Optional[str] = Field(default=None, description="text_slide/script_only (skip 시)")
+    visual_style: str = Field(default="presentation", description="영상 비주얼 스타일")
+    upload_mode: str = Field(default="manual_approval", description="auto/manual_approval")
+    privacy: str = Field(default="private", description="public/unlisted/private")
+
+
+# -- 단건 응답 스키마 --
+
+class StageResponse(BaseModel):
+    """stages 테이블 단건 응답."""
+    id: int
+    job_id: int
+    stage_id: str
+    stage_order: int
+    status: str
+    input_data: Optional[str] = None
+    output_data: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    rejection_target: Optional[str] = None
+    retry_count: int
+    skip: int
+    skip_mode: Optional[str] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    model_config = {"from_attributes": True}
+
+
+class ContentJobResponse(BaseModel):
+    """content_jobs 단건 응답 (스테이지 목록 포함 가능)."""
+    id: int
+    feature_id: str
+    status: str
+    channel_category: Optional[str] = None
+    initial_params: Optional[str] = None
+    current_stage: Optional[str] = None
+    upload_mode: str
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    triggered_by: str
+    youtube_video_id: Optional[str] = None
+    notes: Optional[str] = None
+    legacy_task_id: Optional[int] = None
+    stages: list[StageResponse] = []
+    model_config = {"from_attributes": True}
+
+
+class ContentJobListResponse(BaseModel):
+    """GET /api/f001/jobs 목록 응답 -- cursor 기반 페이징."""
+    items: list[ContentJobResponse]
+    next_cursor: Optional[int] = None
     has_more: bool
+
+
+class StageRetryRequest(BaseModel):
+    """POST .../retry 요청."""
+    override_params: Optional[dict[str, Any]] = Field(default=None)
+
+
+class StageRejectRequest(BaseModel):
+    """POST .../reject 요청."""
+    rejection_reason: str = Field(..., min_length=1)
+    rejection_target: Optional[str] = Field(default=None)
+
+
+class TopicSelectRequest(BaseModel):
+    """주제 선택 요청."""
+    selected_topic_title: str = Field(..., min_length=1)
+
+
+class ApproveRequest(BaseModel):
+    """업로드 승인 요청 -- 최종 메타데이터 수정 포함."""
+    final_title: Optional[str] = Field(default=None)
+    final_description: Optional[str] = Field(default=None)
+    final_tags: Optional[list[str]] = Field(default=None)
 ```
 
-**B. `backend/routers/tasks.py` — list_tasks 시그니처 변경**
+### 라우터 엔드포인트 시그니처
 
 ```python
-# 변경 전
-@router.get("", response_model=TaskListResponse)
-async def list_tasks(
-    limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    feature_id: str | None = Query(default=None, description="업무 ID 필터"),
-    db: aiosqlite.Connection = Depends(get_db),
-) -> TaskListResponse:
-    total, items = await task_service.list_tasks(db, limit=limit, offset=offset, feature_id=feature_id)
-    return TaskListResponse(
-        total=total,
-        items=[TaskResponse.model_validate(item) for item in items],
-    )
+# backend/routers/f001.py (핵심 시그니처)
+router = APIRouter(prefix="/api/f001", tags=["f001"])
 
-# 변경 후
-@router.get("", response_model=TaskListResponse)
-async def list_tasks(
+@router.post("/jobs", response_model=ContentJobResponse, status_code=201)
+async def create_job(request: F001JobCreateRequest, db: aiosqlite.Connection = Depends(get_db))
+
+@router.get("/jobs", response_model=ContentJobListResponse)
+async def list_jobs(
     limit: int = Query(default=20, ge=1, le=100),
-    cursor: int | None = Query(default=None, description="마지막 수신 task id (첫 페이지는 생략)"),
-    feature_id: str | None = Query(default=None, description="업무 ID 필터"),
+    cursor: int | None = Query(default=None),
+    status: str | None = Query(default=None),
+    db: aiosqlite.Connection = Depends(get_db),
+)
+
+@router.get("/jobs/{job_id}", response_model=ContentJobResponse)
+async def get_job(job_id: int, db: aiosqlite.Connection = Depends(get_db))
+
+@router.post("/jobs/{job_id}/stages/{stage_id}/retry", status_code=202)
+async def retry_stage(job_id: int, stage_id: str, request: StageRetryRequest, db: aiosqlite.Connection = Depends(get_db))
+
+@router.post("/jobs/{job_id}/stages/{stage_id}/reject", status_code=202)
+async def reject_stage(job_id: int, stage_id: str, request: StageRejectRequest, db: aiosqlite.Connection = Depends(get_db))
+
+@router.post("/jobs/{job_id}/approve", status_code=202)
+async def approve_job(job_id: int, request: ApproveRequest, db: aiosqlite.Connection = Depends(get_db))
+
+@router.get("/legacy", response_model=TaskListResponse)
+async def list_legacy_jobs(limit: int = Query(default=20), cursor: int | None = Query(default=None), db: aiosqlite.Connection = Depends(get_db))
+
+@router.get("/youtube/quota")
+async def get_youtube_quota()
+```
+
+---
+
+## 섹션 3. cursor 기반 페이징 설계
+
+### 현재 구현 패턴 분석
+
+`backend/services/task_service.py`의 `list_tasks()` 분석:
+
+```python
+# 현재 구현된 cursor 페이징 핵심 로직
+# cursor = 마지막 수신 item의 id
+# id DESC 정렬이므로: cursor보다 id가 작은(더 오래된) 항목 반환
+# limit+1개 조회로 has_more 판단 (n+1 쿼리 패턴)
+
+fetch_limit = limit + 1
+"SELECT * FROM tasks WHERE id < ? ORDER BY id DESC LIMIT ?"  # cursor 있을 때
+"SELECT * FROM tasks ORDER BY id DESC LIMIT ?"               # cursor 없을 때
+
+has_more = len(items) > limit
+if has_more:
+    items = items[:limit]
+next_cursor = items[-1]["id"] if has_more else None
+```
+
+### content_jobs 목록에 동일 패턴 적용
+
+```python
+# backend/services/f001_service.py -- list_jobs() 메서드
+
+async def list_jobs(
+    db: aiosqlite.Connection,
+    limit: int = 20,
+    cursor: Optional[int] = None,
+    status: Optional[str] = None,
+) -> tuple[list[dict], Optional[int], bool]:
+    """cursor 기반 페이징으로 content_jobs 목록 조회.
+    task_service.list_tasks()와 동일한 n+1 패턴 적용.
+    반환: (items, next_cursor, has_more)
+    """
+    fetch_limit = limit + 1
+
+    if cursor is not None and status:
+        db_cursor = await db.execute(
+            "SELECT * FROM content_jobs WHERE id < ? AND status = ? ORDER BY id DESC LIMIT ?",
+            (cursor, status, fetch_limit),
+        )
+    elif cursor is not None:
+        db_cursor = await db.execute(
+            "SELECT * FROM content_jobs WHERE id < ? ORDER BY id DESC LIMIT ?",
+            (cursor, fetch_limit),
+        )
+    elif status:
+        db_cursor = await db.execute(
+            "SELECT * FROM content_jobs WHERE status = ? ORDER BY id DESC LIMIT ?",
+            (status, fetch_limit),
+        )
+    else:
+        db_cursor = await db.execute(
+            "SELECT * FROM content_jobs ORDER BY id DESC LIMIT ?",
+            (fetch_limit,),
+        )
+
+    rows = await db_cursor.fetchall()
+    items = [row_to_dict(r) for r in rows]
+
+    has_more = len(items) > limit
+    if has_more:
+        items = items[:limit]
+
+    next_cursor: Optional[int] = items[-1]["id"] if has_more else None
+    return items, next_cursor, has_more
+```
+
+### API 인터페이스
+
+```
+GET /api/f001/jobs?cursor=42&limit=20
+
+응답:
+{
+  "items": [...],         // 최대 20건 (id DESC 정렬)
+  "next_cursor": 38,      // 다음 페이지 시작 cursor (없으면 null)
+  "has_more": true        // 다음 페이지 존재 여부
+}
+```
+
+- cursor 없이 첫 호출 → 최신 20건 반환
+- `next_cursor: 38` → 다음 호출 시 `?cursor=38` → id < 38인 항목 반환
+- `has_more: false` → 마지막 페이지, 더 보기 버튼 숨김
+
+---
+
+## 섹션 4. 파이프라인 구조 재설계
+
+### 현재 runner.py 동작 방식 분석
+
+`pipelines/runner.py` 분석:
+1. `sys.argv[1]` = task_id, `sys.argv[2]` = feature_id
+2. `tasks` 테이블에서 params 로드
+3. 레지스트리에서 파이프라인 클래스 조회 → `pipeline.run(task_id, params)` 호출
+
+F001 멀티스테이지는 `content_jobs + stages` 테이블을 사용하므로 **별도 orchestrator runner**가 필요하다.
+`f001_service.create_job()`에서 직접 `subprocess.Popen([sys.executable, orchestrator_runner_path, str(job_id)])` 호출하는 방식을 사용한다 (runner.py와 분리).
+
+### 새 파일 구조
+
+```
+pipelines/f001_youtube/
+├── pipeline.py              (기존 -- 레거시 유지, tasks 테이블 기반 단순 스크립트 생성)
+├── orchestrator.py          (신규 -- 6스테이지 오케스트레이터, content_jobs 기반)
+├── run_orchestrator.py      (신규 -- subprocess 진입점: argv[1]=job_id)
+├── config.json              (신규 -- ComfyUI 경로, TTS 설정 등)
+├── stages/
+│   ├── __init__.py          (BaseStage, ValidationResult 정의)
+│   ├── stage01_research.py
+│   ├── stage02_script.py
+│   ├── stage03_tts.py
+│   ├── stage04_video.py
+│   ├── stage05_edit.py
+│   └── stage06_upload.py
+└── validators/
+    ├── __init__.py
+    └── stage_validator.py
+```
+
+### 스테이지 클래스 인터페이스
+
+```python
+# pipelines/f001_youtube/stages/__init__.py
+
+import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+from dataclasses import dataclass
+from typing import Optional
+
+
+@dataclass
+class ValidationResult:
+    """스테이지 입/출력 유효성 검증 결과."""
+    is_valid: bool
+    rejection_reason: Optional[str] = None
+    rejection_target: Optional[str] = None
+
+
+class BaseStage:
+    """F001 스테이지 추상 베이스 클래스.
+
+    BasePipeline의 call_ollama(), call_searxng() 등 유틸을
+    orchestrator를 통해 간접 호출하거나 직접 상속받아 사용한다.
+    """
+
+    STAGE_ID: str = ""
+    STAGE_ORDER: int = 0
+
+    def validate_input(self, data: dict) -> ValidationResult:
+        """스테이지 실행 전 입력 데이터 유효성 검증."""
+        return ValidationResult(is_valid=True)
+
+    def execute(self, job_id: int, input_data: dict) -> dict:
+        """스테이지 실제 실행 -- 하위 클래스에서 반드시 구현."""
+        raise NotImplementedError
+
+    def validate_output(self, output: dict) -> ValidationResult:
+        """스테이지 실행 후 출력 데이터 유효성 검증."""
+        return ValidationResult(is_valid=True)
+```
+
+### 오케스트레이터 핵심 구조
+
+```python
+# pipelines/f001_youtube/orchestrator.py (핵심 구조)
+
+class F001Orchestrator(BasePipeline):
+    """F001 6스테이지 오케스트레이터.
+    BasePipeline 상속으로 call_ollama(), call_searxng() 등 유틸 재사용.
+    content_jobs + stages 테이블 기반 동기 sqlite3 사용.
+    """
+
+    STAGE_SEQUENCE = [
+        ("STAGE_01_RESEARCH", 1, Stage01Research),
+        ("STAGE_02_SCRIPT",   2, Stage02Script),
+        ("STAGE_03_TTS",      3, Stage03TTS),
+        ("STAGE_04_VIDEO_GEN",4, Stage04VideoGen),
+        ("STAGE_05_EDIT",     5, Stage05Edit),
+        ("STAGE_06_UPLOAD",   6, Stage06Upload),
+    ]
+
+    def run(self, job_id: int, params: dict = None) -> dict:  # type: ignore[override]
+        """6스테이지 파이프라인 실행 진입점.
+
+        주의: BasePipeline의 추상 메서드 run(task_id, params) -> dict와 시그니처가 다르다.
+        F001Orchestrator는 content_jobs 기반이므로 job_id만 받아 DB에서 파라미터를 로드한다.
+        params=None, 반환 dict={} 로 추상 메서드 계약을 형식적으로 충족하되
+        실제 반환값은 사용하지 않는다. 타입체커 경고는 # type: ignore[override] 로 억제.
+        """
+        # DB에서 job 및 stages 로드
+        # 각 스테이지 순차 실행 (STAGE_03/04 병렬 옵션 포함)
+        # 스테이지 완료 시마다 DB 상태 업데이트
+        # STAGE_06 완료 후 upload_mode 분기
+
+    def _run_stage(self, job_id: int, stage_instance: BaseStage, input_data: dict) -> dict:
+        """단일 스테이지 실행 + DB 상태 관리."""
+        # stages.status = 'RUNNING' 업데이트
+        # validate_input → execute → validate_output
+        # DONE/REJECTED에 따라 stages 업데이트
+        ...
+
+    def _handle_skip_chain(self, job_id: int, db_conn) -> dict:
+        """STAGE_03/04 skip 설정 확인 후 STAGE_05 입력 구성.
+
+        skip 체인 규칙:
+          STAGE_03 SKIPPED: audio_file_path=None (BGM 전용으로 STAGE_05 진행)
+          STAGE_04 SKIPPED(text_slide): 슬라이드 clips로 STAGE_05 진행
+          STAGE_04 SKIPPED(script_only): STAGE_05도 자동 SKIPPED
+        """
+        stage03 = self._get_stage(db_conn, job_id, "STAGE_03_TTS")
+        stage04 = self._get_stage(db_conn, job_id, "STAGE_04_VIDEO_GEN")
+
+        if stage04["status"] == "SKIPPED" and stage04["skip_mode"] == "script_only":
+            self._mark_stage_skipped(db_conn, job_id, "STAGE_05_EDIT", reason="STAGE_04 script_only skip")
+            return {"stage05_auto_skipped": True}
+
+        stage05_input = {}
+        if stage03["status"] == "COMPLETED":
+            s03_out = json.loads(stage03["output_data"])
+            stage05_input["audio_file_path"] = s03_out.get("audio_file_path")
+        else:
+            stage05_input["audio_file_path"] = None  # BGM 전용 모드
+
+        s04_out = json.loads(stage04["output_data"])
+        stage05_input["clips"] = s04_out.get("clips", [])
+        return stage05_input
+```
+
+### 반송(reject) 메커니즘
+
+```python
+# validators/stage_validator.py -- 핵심 반송 로직
+
+class StageValidator:
+    """스테이지 유효성 검증 및 반송 메커니즘."""
+
+    @staticmethod
+    def handle_rejection(
+        db_conn,
+        job_id: int,
+        current_stage_id: str,
+        rejected_stage_id: str,
+        reason: str,
+    ) -> None:
+        """스테이지를 REJECTED로 전환하고 반송 대상 스테이지를 PENDING으로 리셋.
+
+        rejected_stage_id가 current_stage_id와 같으면 자기 재시도,
+        다르면 이전 스테이지로 반송 (출력 초기화 + retry_count 증가).
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        # 1. 현재 스테이지 REJECTED 처리
+        db_conn.execute(
+            """UPDATE stages
+               SET status='REJECTED', rejection_reason=?, rejection_target=?, finished_at=?
+               WHERE job_id=? AND stage_id=?""",
+            (reason, rejected_stage_id, now, job_id, current_stage_id),
+        )
+
+        # 2. 반송 대상 스테이지를 PENDING으로 리셋 (재실행 대기 상태)
+        db_conn.execute(
+            """UPDATE stages
+               SET status='PENDING', output_data=NULL, rejection_reason=NULL,
+                   started_at=NULL, finished_at=NULL, retry_count = retry_count + 1
+               WHERE job_id=? AND stage_id=?""",
+            (job_id, rejected_stage_id),
+        )
+
+        # 3. content_jobs current_stage 업데이트
+        db_conn.execute(
+            "UPDATE content_jobs SET current_stage=? WHERE id=?",
+            (rejected_stage_id, job_id),
+        )
+        db_conn.commit()
+        # 이후 사용자가 POST /api/f001/jobs/{id}/stages/{rejected_stage_id}/retry 호출
+```
+
+### skip 체인 처리 정리
+
+```
+STAGE_03 skip → audio_file_path=None → STAGE_05는 BGM 전용 모드로 진행 (영상 편집 계속)
+STAGE_04 skip (text_slide) → FFmpeg로 텍스트 슬라이드 PNG 생성 → clips에 포함 → STAGE_05 정상 진행
+STAGE_04 skip (script_only) → STAGE_05 자동 SKIPPED → STAGE_06에서 스크립트+오디오만 산출
+STAGE_03 + STAGE_04 모두 skip (script_only) → STAGE_05 SKIP → STAGE_06 텍스트만 산출
+```
+
+---
+
+## 섹션 5. 스테이지별 구현 상세
+
+### STAGE_01_RESEARCH — 주제 발굴 및 트렌드 분석
+
+**입력 검증 규칙**
+- 통과: `channel_category` 1자 이상, `target_count` 1~20 범위
+- 반송: channel_category가 비어 있는 경우 → STAGE_01 자기 재시도 요청
+
+**핵심 처리 로직**
+
+```python
+# stage01_research.py -- execute() 핵심 로직
+
+def execute(self, job_id: int, input_data: dict) -> dict:
+    channel_category = input_data["channel_category"]
+    target_count = input_data.get("target_count", 5)
+    search_provider = input_data.get("search_provider", "youtube+searxng")
+
+    youtube_results = []
+    searxng_results = []
+
+    # 1차: YouTube Data API (할당량: 검색 1회 = 100유닛)
+    if "youtube" in search_provider:
+        try:
+            youtube_results = self._call_youtube_api(channel_category, days, max_results=50)
+            self._increment_youtube_quota(units_used=100)
+        except YouTubeQuotaExceededError:
+            search_provider = "searxng"  # 할당량 초과 시 SearXNG 단독 폴백
+
+    # 2차: SearXNG (base.py의 call_searxng() 재사용)
+    if "searxng" in search_provider:
+        query = f"{channel_category} 트렌드 인기 영상"
+        searxng_results = self.call_searxng(query, max_results=20)
+
+    # Ollama로 주제 후보 스코어링
+    search_context = self._build_search_context(youtube_results, searxng_results)
+    prompt = self._build_topic_scoring_prompt(channel_category, search_context, target_count)
+    raw_response = self.call_ollama(prompt, timeout=120, num_predict=2048)
+    topics = self._parse_topics_from_response(raw_response, target_count)
+
+    return {
+        "stage_id": "STAGE_01_RESEARCH",
+        "status": "COMPLETED",
+        "channel_category": channel_category,
+        "youtube_results_count": len(youtube_results),
+        "searxng_results_count": len(searxng_results),
+        "topics": topics,
+        "selected_topic": None,  # 사용자 UI 선택 후 채워짐
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+```
+
+**출력 JSON 스키마**
+```json
+{
+  "stage_id": "STAGE_01_RESEARCH",
+  "status": "COMPLETED",
+  "channel_category": "IT/기술",
+  "youtube_results_count": 50,
+  "searxng_results_count": 18,
+  "topics": [
+    {
+      "rank": 1,
+      "title": "2026년 AI 에이전트 최신 트렌드",
+      "estimated_views": "50만~100만",
+      "competition_level": "중간",
+      "recommended_reason": "Google I/O 발표로 검색량 급상승",
+      "keywords": ["AI 에이전트", "Claude", "GPT-4o"],
+      "score": 87,
+      "source": "youtube+searxng"
+    }
+  ],
+  "selected_topic": null,
+  "generated_at": "2026-05-12T10:00:00Z"
+}
+```
+
+**에러 처리**
+- YouTube API 할당량 초과 → SearXNG 단독 폴백 (로그 경고)
+- SearXNG 연결 실패 → RuntimeError → orchestrator FAILED 처리
+- topics 배열 비어 있으면 → ValidationResult(is_valid=False, rejection_reason="주제 후보 생성 실패...")
+
+---
+
+### STAGE_02_SCRIPT — 스크립트 작성
+
+**입력 검증 규칙**
+
+```python
+def validate_input(self, data: dict) -> ValidationResult:
+    selected_topic = data.get("selected_topic")
+    if not selected_topic or not str(selected_topic).strip():
+        return ValidationResult(
+            is_valid=False,
+            rejection_reason="선택된 주제가 없습니다. STAGE_01에서 주제를 선택하세요.",
+            rejection_target="STAGE_01_RESEARCH",
+        )
+    return ValidationResult(is_valid=True)
+```
+
+**핵심 처리 로직**
+
+```python
+def execute(self, job_id: int, input_data: dict) -> dict:
+    selected_topic = input_data["selected_topic"]
+    duration_min = input_data.get("duration_min", 10)
+    target_chars = duration_min * 170  # 분당 약 170자
+
+    # 1단계: 스크립트 생성 (Ollama)
+    script_prompt = self._build_script_prompt(selected_topic, input_data)
+    raw_script = self.call_ollama(script_prompt, timeout=180, num_predict=4096)
+    parsed_script = self._parse_script_structure(raw_script)
+
+    # 2단계: 씬 분해 (Ollama)
+    scene_prompt = self._build_scene_decompose_prompt(raw_script, duration_min)
+    raw_scenes = self.call_ollama(scene_prompt, timeout=120, num_predict=2048)
+    scenes = self._parse_scenes(raw_scenes)
+
+    full_script_text = " ".join([
+        parsed_script.get("hook", ""),
+        *[s.get("content", "") for s in parsed_script.get("body", [])],
+        parsed_script.get("cta", ""),
+    ])
+
+    return {
+        "stage_id": "STAGE_02_SCRIPT",
+        "status": "COMPLETED",
+        "selected_topic": selected_topic,
+        "script": parsed_script,
+        "scenes": scenes,
+        "script_text": full_script_text,
+        "total_chars": len(full_script_text),
+        "estimated_duration_min": len(full_script_text) // 170,
+        "seo_keywords": input_data.get("keywords", []),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+```
+
+**출력 JSON 스키마**
+```json
+{
+  "stage_id": "STAGE_02_SCRIPT",
+  "status": "COMPLETED",
+  "selected_topic": "2026년 AI 에이전트 최신 트렌드",
+  "script": {
+    "hook": "지금 이 순간에도 AI가 여러분 대신 일하고 있습니다...",
+    "body": [{"section_title": "AI 에이전트란?", "content": "...", "duration_sec": 90}],
+    "cta": "지금 구독하시면 매주 AI 최신 트렌드를..."
+  },
+  "scenes": [{"scene_no": 1, "description": "발표장 배경, AI 로고들", "duration_sec": 10}],
+  "script_text": "훅+본문+CTA 전체 텍스트",
+  "total_chars": 1680,
+  "estimated_duration_min": 10,
+  "seo_keywords": ["AI 에이전트", "클로드", "2026 AI"],
+  "generated_at": "2026-05-12T10:05:00Z"
+}
+```
+
+**에러 처리**
+- `total_chars < 200` → ValidationResult(is_valid=False, rejection_reason="스크립트 분량 부족...")
+- hook/body/cta 중 하나 비어 있음 → ValidationResult(is_valid=False, ...)
+
+---
+
+### STAGE_03_TTS — AI 보이스오버 생성 (skip 가능)
+
+**핵심 처리 로직**
+
+```python
+def execute(self, job_id: int, input_data: dict) -> dict:
+    if input_data.get("tts_skip", False):
+        return {"stage_id": "STAGE_03_TTS", "status": "SKIPPED",
+                "skip_reason": "사용자 선택으로 TTS 건너뜀",
+                "generated_at": datetime.now(timezone.utc).isoformat()}
+
+    provider = input_data.get("tts_provider", "coqui")
+    script_text = input_data["script_text"]
+    output_path = str(Path(f"storage/results/f001/{job_id}") / "voiceover.mp3")
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    if provider == "coqui":
+        # subprocess CLI 호출 -- 모델: tts_models/ko/css10/vits
+        result = subprocess.run([
+            sys.executable, "-m", "TTS",
+            "--text", script_text,
+            "--model_name", "tts_models/ko/css10/vits",
+            "--out_path", output_path,
+        ], capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=600)
+        if result.returncode != 0:
+            raise RuntimeError(f"Coqui TTS 실패: {result.stderr[:500]}")
+
+    elif provider == "kokoro":
+        from kokoro import KPipeline
+        import soundfile as sf
+        pipeline = KPipeline(lang_code='ko')
+        samples, sample_rate = pipeline(script_text)
+        sf.write(output_path, samples, sample_rate)
+
+    elif provider == "elevenlabs":
+        # ElevenLabs REST API -- ELEVENLABS_API_KEY 환경변수 필요
+        ...
+
+    elif provider == "openai":
+        # OpenAI TTS API -- OPENAI_API_KEY 환경변수 필요
+        ...
+
+    return {
+        "stage_id": "STAGE_03_TTS", "status": "COMPLETED",
+        "tts_provider": provider, "audio_file_path": output_path,
+        "duration_sec": self._get_audio_duration(output_path),
+        "file_size_kb": Path(output_path).stat().st_size // 1024,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+```
+
+**출력 JSON 스키마**
+```json
+{
+  "stage_id": "STAGE_03_TTS", "status": "COMPLETED",
+  "tts_provider": "coqui",
+  "audio_file_path": "storage/results/f001/42/voiceover.mp3",
+  "duration_sec": 612, "file_size_kb": 4800,
+  "generated_at": "2026-05-12T10:12:00Z"
+}
+```
+
+---
+
+### STAGE_04_VIDEO_GEN — 씬별 영상/이미지 클립 생성 (skip 가능)
+
+**핵심 처리 로직**
+
+```python
+def execute(self, job_id: int, input_data: dict) -> dict:
+    skip = input_data.get("skip", False)
+    skip_mode = input_data.get("skip_mode")
+
+    if skip and skip_mode == "script_only":
+        return {"stage_id": "STAGE_04_VIDEO_GEN", "status": "SKIPPED",
+                "skip_mode": "script_only", "clips": [],
+                "generated_at": datetime.now(timezone.utc).isoformat()}
+
+    output_dir = Path(f"storage/results/f001/{job_id}/clips")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if skip and skip_mode == "text_slide":
+        # FFmpeg로 섹션 제목 텍스트 슬라이드 PNG 생성
+        clips = self._generate_text_slides(input_data["scenes"], output_dir)
+        return {"stage_id": "STAGE_04_VIDEO_GEN", "status": "SKIPPED",
+                "skip_mode": "text_slide", "clips": clips,
+                "generated_at": datetime.now(timezone.utc).isoformat()}
+
+    # ComfyUI 연동 -- F003 ComfyUIClient 재활용 (D:\comfyui\ComfyUI, 포트 8188)
+    config = self._load_config()  # pipelines/f001_youtube/config.json
+    comfyui_url = config.get("comfyui_url", "http://localhost:8188")
+    from pipelines.f003_video_creation.comfyui_client import ComfyUIClient
+    client = ComfyUIClient(comfyui_url)
+
+    if not client.health_check():
+        raise RuntimeError("ComfyUI 서버 연결 실패. D:\\comfyui\\ComfyUI 실행 후 재시도하세요.")
+
+    clips = []
+    for scene in input_data["scenes"]:
+        # Ollama: 씬 설명 → 영어 이미지 프롬프트 변환
+        image_prompt = self.call_ollama(
+            f"Convert scene description to English image generation prompt: {scene['description']}",
+            timeout=60, num_predict=200,
+        )
+        output_files = self._run_comfyui_workflow(client, image_prompt, scene, output_dir)
+        clips.extend(output_files)
+
+    thumbnail_dir = Path(f"storage/results/f001/{job_id}/thumbnails")
+    thumbnail_dir.mkdir(parents=True, exist_ok=True)
+    thumbnail_candidates = self._generate_thumbnails(client, input_data, thumbnail_dir)
+
+    return {
+        "stage_id": "STAGE_04_VIDEO_GEN", "status": "COMPLETED",
+        "generation_backend": "comfyui",
+        "comfyui_path": r"D:\comfyui\ComfyUI",
+        "clips": clips, "thumbnail_candidates": thumbnail_candidates,
+        "total_clips": len(clips),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+```
+
+**출력 JSON 스키마**
+```json
+{
+  "stage_id": "STAGE_04_VIDEO_GEN", "status": "COMPLETED",
+  "generation_backend": "comfyui", "comfyui_path": "D:\\comfyui\\ComfyUI",
+  "clips": [{"scene_no": 1, "file_path": "storage/results/f001/42/clips/scene_1.png", "duration_sec": 10}],
+  "thumbnail_candidates": ["storage/results/f001/42/thumbnails/thumb_1.png"],
+  "total_clips": 8, "generated_at": "2026-05-12T10:30:00Z"
+}
+```
+
+---
+
+### STAGE_05_EDIT — 자동 편집 및 자막 생성
+
+**핵심 처리 로직**
+
+```python
+def execute(self, job_id: int, input_data: dict) -> dict:
+    clips = input_data.get("clips", [])
+    audio_file_path = input_data.get("audio_file_path")  # None 가능 (STAGE_03 skip 시)
+    output_dir = Path(f"storage/results/f001/{job_id}/final")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_video = str(output_dir / "output.mp4")
+    output_srt = str(output_dir / "subtitles.srt")
+
+    # 1. FFmpeg: clips 순서대로 타임라인 + 오디오 믹싱
+    #    각 클립이 PNG이면 duration_sec 동안 정지 영상으로 처리
+    self._run_ffmpeg_concat(clips, audio_file_path, output_video, input_data)
+
+    # 2. Whisper: 오디오 → SRT 자막 생성
+    has_subtitles = False
+    if audio_file_path and Path(audio_file_path).exists():
+        self._run_whisper_transcribe(audio_file_path, output_srt)
+        has_subtitles = Path(output_srt).exists()
+
+    # 3. BGM 삽입 (선택)
+    if input_data.get("bgm_enabled", False):
+        bgm_path = self._find_bgm_file()
+        if bgm_path:
+            self._mix_bgm(output_video, bgm_path, input_data.get("bgm_volume", 0.15))
+
+    file_info = self._get_video_info(output_video)
+
+    return {
+        "stage_id": "STAGE_05_EDIT", "status": "COMPLETED",
+        "video_file_path": output_video, "video_file_name": "output.mp4",
+        "subtitle_file_path": output_srt if has_subtitles else None,
+        "duration_sec": file_info.get("duration_sec", 0),
+        "resolution": file_info.get("resolution", "1280x720"),
+        "file_size_mb": file_info.get("file_size_mb", 0),
+        "has_subtitles": has_subtitles,
+        "has_bgm": input_data.get("bgm_enabled", False),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+```
+
+**출력 JSON 스키마**
+```json
+{
+  "stage_id": "STAGE_05_EDIT", "status": "COMPLETED",
+  "video_file_path": "storage/results/f001/42/final/output.mp4",
+  "subtitle_file_path": "storage/results/f001/42/final/subtitles.srt",
+  "duration_sec": 635, "resolution": "1280x720",
+  "file_size_mb": 120, "has_subtitles": true, "has_bgm": false,
+  "generated_at": "2026-05-12T11:00:00Z"
+}
+```
+
+---
+
+### STAGE_06_SEO_UPLOAD — SEO 최적화 및 YouTube 업로드
+
+**핵심 처리 로직 (YouTube Data API 유닛 소모량 반영)**
+
+```python
+def execute(self, job_id: int, input_data: dict) -> dict:
+    script_data = input_data["script_data"]
+    upload_mode = input_data.get("upload_mode", "manual_approval")
+    video_file_path = input_data.get("video_file_path")
+
+    # 1. Ollama: SEO 최적화 제목/설명/태그 생성
+    seo_prompt = self._build_seo_prompt(script_data)
+    raw_seo = self.call_ollama(seo_prompt, timeout=120, num_predict=1024)
+    seo_metadata = self._parse_seo_response(raw_seo)
+
+    # 2. Ollama: 제목 A/B 변형 2개
+    raw_variants = self.call_ollama(
+        f"다음 제목의 A/B 테스트용 변형 2개: {seo_metadata['title']}",
+        timeout=60, num_predict=200,
+    )
+    seo_metadata["title_variants"] = self._parse_title_variants(raw_variants)
+
+    # 3. upload_mode 분기
+    # YouTube Data API 유닛 소모량:
+    #   videos.insert = 1,600유닛, thumbnails.set = 50유닛
+    #   일일 10,000유닛 기준 약 6회 업로드 가능
+    upload_status = "PENDING_APPROVAL"
+    youtube_video_id = None
+
+    if upload_mode == "auto" and video_file_path:
+        # 잔여 유닛 확인 (1,650 미만이면 업로드 차단)
+        remaining = self._get_youtube_quota_remaining()
+        if remaining < 1650:
+            raise RuntimeError(f"YouTube API 일일 유닛 부족 (잔여: {remaining}유닛)")
+        youtube_video_id = self._upload_to_youtube(video_file_path, input_data, seo_metadata)
+        self._increment_youtube_quota(units_used=1650)
+        upload_status = "UPLOADED"
+
+    return {
+        "stage_id": "STAGE_06_UPLOAD", "status": "COMPLETED",
+        "seo_metadata": seo_metadata,
+        "upload_mode": upload_mode, "upload_status": upload_status,
+        "youtube_video_id": youtube_video_id,
+        "youtube_url": f"https://youtu.be/{youtube_video_id}" if youtube_video_id else None,
+        "uploaded_at": datetime.now(timezone.utc).isoformat() if youtube_video_id else None,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+```
+
+**출력 JSON 스키마**
+```json
+{
+  "stage_id": "STAGE_06_UPLOAD", "status": "COMPLETED",
+  "seo_metadata": {
+    "title": "AI가 스스로 일한다? 2026 에이전트 혁명 완벽 정리 [최신]",
+    "description": "2026년 AI 에이전트의 모든 것...",
+    "tags": ["AI 에이전트", "클로드", "GPT", "2026 AI 트렌드"],
+    "category": "28",
+    "title_variants": ["AI 에이전트 완벽 가이드 2026", "당신도 모르는 AI 에이전트의 비밀"]
+  },
+  "upload_mode": "manual_approval", "upload_status": "PENDING_APPROVAL",
+  "youtube_video_id": null, "youtube_url": null, "uploaded_at": null,
+  "generated_at": "2026-05-12T11:05:00Z"
+}
+```
+
+---
+
+## 섹션 6. 프론트엔드 변경 계획
+
+### 신규 파일
+
+**`frontend/src/views/F001View.vue`** — F001 메인 화면
+
+```
+화면 구성:
+├── 헤더 (뒤로 버튼 + "유튜브 컨텐츠 제작")
+├── 신규 작업 섹션
+│   ├── "새 작업 추가" 버튼 → 다단계 모달 (Step1~4)
+│   └── 작업 목록 테이블 (cursor 기반 페이징)
+│       열: ID / 상태 / 채널 카테고리 / 현재 스테이지 / 생성 일시 / 액션
+│       행 클릭 시 /f001/jobs/{id} 이동
+└── 레거시 이력 섹션 (기본 접힘, 토글)
+    └── 기존 tasks 테이블 F001 이력 목록 → 클릭 시 /tasks/{id}
+```
+
+**`frontend/src/views/F001JobDetailView.vue`** — 스테이지 타임라인 상세
+
+```
+화면 구성:
+├── 헤더: 작업 #42 (IT/기술) — 전체 상태 배지 + 2초 폴링
+├── StageTimeline 컴포넌트 (6단계 세로 스텝)
+│   각 스테이지 행: 상태 아이콘 + 이름 + 간략 결과 + 재시도/반송 버튼
+│   행 클릭 시 StageResultViewer 패널 토글
+└── PENDING_APPROVAL 시: 승인 대기 배너 + 승인/거부 버튼
+```
+
+### 수정 파일
+
+**`frontend/src/router/index.js`** — 라우트 추가
+
+```javascript
+// F001 전용 라우트 -- /features/F003 패턴과 동일하게 :id 앞에 등록
+{
+  path: '/features/F001',
+  name: 'F001Feature',
+  component: F001View,
+},
+{
+  path: '/f001/jobs/:jobId',
+  name: 'F001JobDetail',
+  component: F001JobDetailView,
+},
+```
+
+**`frontend/src/views/DashboardView.vue`** — F001 라우팅 추가
+
+```javascript
+// 현재 패턴 (F003만 전용 뷰):
+// feature.feature_id === 'F003' ? F003Feature : Feature
+
+// 변경 후 (F001도 전용 뷰):
+feature.feature_id === 'F003'
+  ? router.push({ name: 'F003Feature' })
+  : feature.feature_id === 'F001'
+    ? router.push({ name: 'F001Feature' })
+    : router.push({ name: 'Feature', params: { id: feature.feature_id } })
+```
+
+**`frontend/src/api/index.js`** — F001 API 함수 추가
+
+```javascript
+// F001 API 함수 목록
+export const getF001Jobs = (limit = 20, cursor = null, status = null) =>
+  api.get('/api/f001/jobs', { params: { limit, ...(cursor != null ? { cursor } : {}), ...(status ? { status } : {}) } })
+
+export const getF001Job = (jobId) => api.get(`/api/f001/jobs/${jobId}`)
+export const createF001Job = (params) => api.post('/api/f001/jobs', params)
+export const retryF001Stage = (jobId, stageId, overrideParams = null) =>
+  api.post(`/api/f001/jobs/${jobId}/stages/${stageId}/retry`, { override_params: overrideParams })
+export const rejectF001Stage = (jobId, stageId, reason, rejectionTarget = null) =>
+  api.post(`/api/f001/jobs/${jobId}/stages/${stageId}/reject`, { rejection_reason: reason, rejection_target: rejectionTarget })
+export const approveF001Job = (jobId, finalMeta = {}) =>
+  api.post(`/api/f001/jobs/${jobId}/approve`, finalMeta)
+export const selectF001Topic = (jobId, topicRank, title) =>
+  api.post(`/api/f001/jobs/${jobId}/topics/${topicRank}/select`, { selected_topic_title: title })
+export const getF001Legacy = (limit = 20, cursor = null) =>
+  api.get('/api/f001/legacy', { params: { limit, ...(cursor != null ? { cursor } : {}) } })
+export const getYoutubeQuota = () => api.get('/api/f001/youtube/quota')
+```
+
+### Pinia 스토어 state 구조
+
+```javascript
+// frontend/src/store/f001.js
+
+export const useF001Store = defineStore('f001', () => {
+  // State
+  const jobs = ref([])           // content_jobs 목록
+  const currentJob = ref(null)   // 현재 상세 조회된 job (스테이지 포함)
+  const legacyJobs = ref([])     // 레거시 tasks 목록
+
+  // cursor 기반 페이징 상태 (tasks.js 동일 패턴)
+  const nextCursor = ref(null)
+  const hasMore = ref(false)
+  const legacyNextCursor = ref(null)
+  const legacyHasMore = ref(false)
+
+  const loading = ref(false)
+  const errorMsg = ref('')
+
+  // Actions
+  async function fetchJobs(limit = 20, status = null) { ... }
+  async function fetchMoreJobs(limit = 20) { ... }  // "더 보기" 패턴
+  async function fetchJob(jobId) { ... }
+  async function createJob(params) { ... }
+  async function fetchLegacyJobs(limit = 20) { ... }
+
+  return { jobs, currentJob, legacyJobs, nextCursor, hasMore, legacyNextCursor, legacyHasMore,
+           loading, errorMsg, fetchJobs, fetchMoreJobs, fetchJob, createJob, fetchLegacyJobs }
+})
+```
+
+### cursor 기반 페이징 -- Vue 적용
+
+```javascript
+// F001View.vue onMounted: 신규 + 레거시 병렬 로드
+onMounted(async () => {
+  await Promise.all([
+    f001Store.fetchJobs(20),       // GET /api/f001/jobs
+    f001Store.fetchLegacyJobs(20), // GET /api/f001/legacy
+  ])
+})
+
+// 더 보기 버튼
+async function loadMore() {
+  await f001Store.fetchMoreJobs(20)
+}
+```
+
+---
+
+## 섹션 7. 스토리지 구조
+
+### 디렉토리 구조
+
+```
+storage/results/f001/{job_id}/
+├── stage01_topics.json             -- STAGE_01 출력
+├── stage02_script.json             -- STAGE_02 출력
+├── stage02_scenes.json             -- STAGE_02 씬 목록
+├── voiceover.mp3                   -- STAGE_03 TTS 출력 (skip 시 없음)
+├── clips/
+│   ├── scene_01.png                -- STAGE_04 씬별 이미지
+│   └── slide_01.png                -- text_slide skip 시 슬라이드
+├── thumbnails/
+│   ├── thumb_1.png
+│   └── thumb_2.png
+├── final/
+│   ├── output.mp4                  -- STAGE_05 최종 영상
+│   └── subtitles.srt               -- Whisper 자막
+└── stage06_metadata.json           -- STAGE_06 SEO 메타데이터
+```
+
+### FastAPI StaticFiles 마운트
+
+```python
+# backend/main.py 수정 내용
+f001_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f001"
+f001_results_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/results/f001", StaticFiles(directory=str(f001_results_dir)), name="f001_results")
+
+# 영상 URL: http://localhost:8000/results/f001/42/final/output.mp4
+# 이미지 URL: http://localhost:8000/results/f001/42/clips/scene_01.png
+```
+
+---
+
+## 섹션 8. 레거시 F001 하이브리드 처리
+
+### 현재 레거시 데이터 구조
+
+`FeatureView.vue`, `TaskDetailView.vue` 분석 결과:
+- 기존 F001 이력: `/api/tasks?feature_id=F001` 조회 (tasks 테이블)
+- task.result JSON: `{"title": "...", "description": "...", "script": "..."}`
+- 상세: `/tasks/{id}` → TaskDetailView.vue
+
+### 통합 뷰어 API 병렬 조회 패턴
+
+```javascript
+// F001View.vue onMounted -- 두 API 병렬 호출 (Promise.allSettled 로 한쪽 실패해도 다른쪽 표시)
+
+onMounted(async () => {
+  const [newJobsResult, legacyResult] = await Promise.allSettled([
+    apiGetF001Jobs(20),     // GET /api/f001/jobs (신규 content_jobs)
+    apiGetF001Legacy(20),   // GET /api/f001/legacy (tasks WHERE feature_id='F001')
+  ])
+
+  if (newJobsResult.status === 'fulfilled') {
+    f001Store.jobs = newJobsResult.value.data.items ?? []
+    f001Store.nextCursor = newJobsResult.value.data.next_cursor ?? null
+    f001Store.hasMore = newJobsResult.value.data.has_more ?? false
+  }
+
+  if (legacyResult.status === 'fulfilled') {
+    f001Store.legacyJobs = legacyResult.value.data.items ?? []
+  }
+})
+```
+
+### 레거시 API 엔드포인트
+
+```python
+# routers/f001.py -- GET /api/f001/legacy
+# 기존 task_service.list_tasks() 재사용 (feature_id='F001' 필터)
+@router.get("/legacy", response_model=TaskListResponse)
+async def list_legacy_jobs(
+    limit: int = Query(default=20, ge=1, le=100),
+    cursor: int | None = Query(default=None),
     db: aiosqlite.Connection = Depends(get_db),
 ) -> TaskListResponse:
     items, next_cursor, has_more = await task_service.list_tasks(
-        db, limit=limit, cursor=cursor, feature_id=feature_id
+        db, limit=limit, cursor=cursor, feature_id="F001"
     )
     return TaskListResponse(
         items=[TaskResponse.model_validate(item) for item in items],
@@ -138,821 +1333,302 @@ async def list_tasks(
     )
 ```
 
-**C. `backend/services/task_service.py` — list_tasks 재작성**
+### 선택적 마이그레이션 엔드포인트
 
 ```python
-# 변경 전
-async def list_tasks(
-    self,
-    db: aiosqlite.Connection,
-    limit: int = 20,
-    offset: int = 0,
-    feature_id: Optional[str] = None,
-) -> tuple[int, list[dict]]:
-    # COUNT(*) + OFFSET 방식
-
-# 변경 후
-async def list_tasks(
-    self,
-    db: aiosqlite.Connection,
-    limit: int = 20,
-    cursor: int | None = None,
-    feature_id: str | None = None,
-) -> tuple[list[dict], int | None, bool]:
-    """
-    cursor 기반 페이징으로 task 목록 조회.
-
-    반환: (items, next_cursor, has_more)
-    - limit+1개를 조회하여 has_more 판단
-    - cursor가 있으면 WHERE id < cursor 조건 추가
-    """
-    fetch_limit = limit + 1  # has_more 판단용
-
-    if cursor is not None and feature_id:
-        cursor_row = await db.execute(
-            "SELECT * FROM tasks WHERE id < ? AND feature_id = ? ORDER BY id DESC LIMIT ?",
-            (cursor, feature_id, fetch_limit),
-        )
-    elif cursor is not None:
-        cursor_row = await db.execute(
-            "SELECT * FROM tasks WHERE id < ? ORDER BY id DESC LIMIT ?",
-            (cursor, fetch_limit),
-        )
-    elif feature_id:
-        cursor_row = await db.execute(
-            "SELECT * FROM tasks WHERE feature_id = ? ORDER BY id DESC LIMIT ?",
-            (feature_id, fetch_limit),
-        )
-    else:
-        cursor_row = await db.execute(
-            "SELECT * FROM tasks ORDER BY id DESC LIMIT ?",
-            (fetch_limit,),
-        )
-
-    rows = await cursor_row.fetchall()
-    items = [row_to_dict(r) for r in rows]
-
-    has_more = len(items) > limit
-    if has_more:
-        items = items[:limit]  # 초과분 제거
-
-    next_cursor = items[-1]["id"] if has_more else None
-    return items, next_cursor, has_more
+# POST /api/f001/migrate-legacy
+# 변환 규칙:
+#   tasks.id -> content_jobs.legacy_task_id
+#   tasks.params.topic -> content_jobs.channel_category
+#   tasks.result -> stages 테이블 STAGE_02 output_data
+#   tasks.status -> content_jobs.status (그대로)
+#   원본 tasks 레코드는 삭제하지 않음 (안전 유지)
 ```
-
-**D. `frontend/src/api/index.js` — getTasks, getTasksByFeature 변경**
-
-```javascript
-// 변경 전
-export const getTasks = (limit = 20, offset = 0) =>
-  api.get('/api/tasks', { params: { limit, offset } })
-
-export const getTasksByFeature = (featureId, limit = 50, offset = 0) =>
-  api.get('/api/tasks', { params: { feature_id: featureId, limit, offset } })
-
-// 변경 후
-export const getTasks = (limit = 20, cursor = null) =>
-  api.get('/api/tasks', { params: { limit, ...(cursor != null ? { cursor } : {}) } })
-
-export const getTasksByFeature = (featureId, limit = 50, cursor = null) =>
-  api.get('/api/tasks', { params: { feature_id: featureId, limit, ...(cursor != null ? { cursor } : {}) } })
-
-// 추가: 모델 자산 API
-export const getModelAssets = () => api.get('/api/model-assets')
-export const getDownloads = () => api.get('/api/model-assets/downloads')
-export const triggerDownload = (payload) => api.post('/api/model-assets/download', payload)
-```
-
-**E. `frontend/src/store/tasks.js` — cursor 기반 상태 및 액션 추가**
-
-```javascript
-// 추가할 state
-const nextCursor = ref(null)
-const hasMore = ref(false)
-
-// 변경할 fetchTasks
-async function fetchTasks(limit = 20, cursor = null) {
-    try {
-        const res = await apiGetTasks(limit, cursor)
-        tasks.value = res.data.items ?? []
-        nextCursor.value = res.data.next_cursor ?? null
-        hasMore.value = res.data.has_more ?? false
-    } catch (err) {
-        console.error('[TaskStore] fetchTasks 실패:', err)
-    }
-}
-
-// 추가: 다음 페이지 로드 (무한 스크롤 지원)
-async function fetchMoreTasks(limit = 20) {
-    if (!hasMore.value || nextCursor.value == null) return
-    try {
-        const res = await apiGetTasks(limit, nextCursor.value)
-        tasks.value = [...tasks.value, ...(res.data.items ?? [])]
-        nextCursor.value = res.data.next_cursor ?? null
-        hasMore.value = res.data.has_more ?? false
-    } catch (err) {
-        console.error('[TaskStore] fetchMoreTasks 실패:', err)
-    }
-}
-
-// return에 추가
-return { tasks, features, nextCursor, hasMore, fetchTasks, fetchMoreTasks, fetchFeatures, createTask, cancelTask, deleteTaskRecord }
-```
-
-**F. `frontend/src/views/DashboardView.vue` — 폴링 호출 변경**
-
-```javascript
-// 변경 전
-pollTimer = setInterval(() => taskStore.fetchTasks(10, 0), 10000)
-taskStore.fetchTasks(10, 0).catch(() => {})
-
-// 변경 후 (cursor 없이 항상 최신 10개 조회)
-pollTimer = setInterval(() => taskStore.fetchTasks(10), 10000)
-taskStore.fetchTasks(10).catch(() => {})
-```
-
-### 2-5. 트레이드오프 분석
-
-| 항목 | 오프셋 | cursor |
-|------|--------|--------|
-| 실시간 안정성 | 낮음 (새 task 삽입 시 경계 불안정) | 높음 (id 기반으로 안정적) |
-| COUNT 쿼리 | 필요 (별도 쿼리) | 불필요 |
-| 대용량 성능 | 느림 (N개 스캔 후 버림) | 빠름 (인덱스 range scan) |
-| "총 N개" 표시 | 가능 | 불가 (필요 시 별도 엔드포인트) |
-| 특정 페이지 직접 이동 | 가능 | 불가 (순차 이동만 가능) |
-| 구현 복잡도 | 낮음 | 중간 |
-
-DashboardView는 최근 10개만 표시하고 폴링 시 cursor를 초기화(항상 첫 페이지)하는 방식으로 운영한다.
 
 ---
 
-## 3. F003 구현 계획
+## 섹션 9. 외부 서비스 설치/설정 계획
 
-### 3-1. DB 스키마 추가
+### Coqui TTS (1순위)
 
-`backend/core/database.py`의 `init_db()` 함수에 다음 2개 테이블을 추가한다.
+```
+pip install TTS
+# GPU 가속 선택:
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-```sql
--- 모델 인벤토리 — ComfyUI 기준 로컬 모델 목록 관리
-CREATE TABLE IF NOT EXISTS model_inventory (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    model_type          TEXT    NOT NULL,      -- checkpoint/lora/motion_module/vae/clip
-    name                TEXT    NOT NULL,
-    filename            TEXT    NOT NULL,
-    local_path          TEXT    NOT NULL,
-    civitai_version_id  INTEGER,
-    hf_repo_id          TEXT,
-    is_downloaded       INTEGER NOT NULL DEFAULT 0,
-    file_size_mb        REAL,
-    downloaded_at       DATETIME,
-    base_model          TEXT,                  -- SD1.5/SDXL/Flux.1
-    style_tags          TEXT                   -- JSON 배열 ["anime", "realistic"]
-);
-
--- 모델 다운로드 큐 — 비동기 다운로드 진행 상태 추적
-CREATE TABLE IF NOT EXISTS model_download_queue (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    source          TEXT    NOT NULL,          -- civitai/huggingface
-    model_type      TEXT    NOT NULL,
-    source_id       TEXT    NOT NULL,
-    target_path     TEXT    NOT NULL,
-    status          TEXT    NOT NULL DEFAULT 'QUEUED',  -- QUEUED/DOWNLOADING/DONE/FAILED
-    progress_pct    REAL    DEFAULT 0,
-    error_message   TEXT,
-    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
-    finished_at     DATETIME
-);
+한국어 모델 확인:
+  tts --list_models | findstr /i "ko"
+  # 결과: tts_models/ko/css10/vits (약 80~100MB, 첫 실행 시 자동 다운로드)
 ```
 
-추가 위치: `_CREATE_SETTINGS` 상수 정의 뒤, `init_db()` 함수 내에 `await conn.execute(_CREATE_MODEL_INVENTORY)` 및 `await conn.execute(_CREATE_MODEL_DOWNLOAD_QUEUE)` 추가.
+### Kokoro TTS (2순위, 한국어 지원 여부 확인 필요)
 
-### 3-2. 새 파일 및 수정 파일 전체 목록
+```
+pip install kokoro soundfile
+# Hexgrad/Kokoro-82M (HuggingFace 자동 다운로드, VRAM ~1~2GB)
 
-**신규 파일**:
-
-| 파일 경로 | 역할 |
-|---------|------|
-| `pipelines/f003_video_creation/__init__.py` | 패키지 초기화 (F003Pipeline export) |
-| `pipelines/f003_video_creation/pipeline.py` | F003 메인 파이프라인 (BasePipeline 상속) |
-| `pipelines/f003_video_creation/comfyui_client.py` | ComfyUI REST + WebSocket API 클라이언트 |
-| `pipelines/f003_video_creation/model_manager.py` | 모델 로컬 인벤토리 조회 및 CivitAI/HF 다운로드 |
-| `pipelines/f003_video_creation/prompt_generator.py` | Ollama 기반 SD/Flux.1 프롬프트 생성 |
-| `pipelines/f003_video_creation/style_mapper.py` | 스타일 선택 → 워크플로우 파라미터 매핑 |
-| `pipelines/f003_video_creation/config.json` | F003 기본 설정 (ComfyUI URL, 기본 모델명, 스타일 매핑 테이블) |
-| `pipelines/f003_video_creation/workflows/animatediff_base.json` | AnimateDiff-Evolved 기본 워크플로우 JSON (API 포맷) |
-| `pipelines/f003_video_creation/workflows/flux_base.json` | Flux.1 기본 워크플로우 JSON (API 포맷) |
-| `backend/services/model_service.py` | model_inventory 테이블 CRUD |
-| `backend/services/download_service.py` | model_download_queue 관리 + httpx 스트리밍 다운로드 |
-| `backend/routers/model_assets.py` | `/api/model-assets` 엔드포인트 라우터 |
-| `backend/schemas/model_asset.py` | ModelInventoryResponse, DownloadQueueResponse 스키마 |
-| `frontend/src/views/F003View.vue` | F003 전용 다단계 UI 컴포넌트 |
-
-**수정 파일**:
-
-| 파일 경로 | 변경 내용 |
-|---------|---------|
-| `backend/core/database.py` | model_inventory, model_download_queue 테이블 추가 |
-| `backend/routers/tasks.py` | cursor 기반 페이징으로 전환 |
-| `backend/services/task_service.py` | list_tasks cursor 기반으로 재작성 |
-| `backend/schemas/task.py` | TaskListResponse 변경 (total 제거, next_cursor/has_more 추가) |
-| `backend/routers/features.py` | FEATURES 딕셔너리에 F003 항목 추가 |
-| `backend/main.py` | model_assets 라우터 등록 |
-| `frontend/src/api/index.js` | cursor 기반 getTasks, 모델 자산 API 함수 추가 |
-| `frontend/src/store/tasks.js` | cursor 기반 fetchTasks, nextCursor/hasMore 상태 추가, fetchMoreTasks 추가 |
-| `frontend/src/views/DashboardView.vue` | offset 인자 제거 |
-| `frontend/src/router/index.js` | F003 전용 라우트 추가 |
-| `frontend/src/views/TaskDetailView.vue` | F003 미디어 결과 렌더링 블록 추가 |
-| `pipelines/runner.py` | F003 파이프라인 레지스트리 등록 |
-
-### 3-3. 각 모듈별 설계 상세
-
-#### 3-3-A. `backend/routers/features.py` — F003 항목 추가
-
-FEATURES 딕셔너리에 다음 항목을 추가한다 (핵심 필드만 표기):
-
-```python
-"F003": {
-    "feature_id": "F003",
-    "name": "영상제작",
-    "description": "ComfyUI와 Ollama를 활용하여 동영상(AnimateDiff) 또는 그림(Flux.1/SD)을 자동 생성합니다.",
-    "supports_schedule": False,
-    "input_schema": [
-        # 생성 유형
-        {"name": "generation_type", "title": "생성 유형", "type": "select",
-         "required": True, "default": "image", "options": ["image", "video"], ...},
-        # 카테고리 1 — 아트 스타일
-        {"name": "art_style", "title": "아트 스타일", "type": "select",
-         "default": "realistic", "options": ["anime","realistic","fantasy","cyberpunk","watercolor","3d_render","pixel_art"], ...},
-        # 카테고리 2 — 캐릭터 외형 (5개 서브)
-        {"name": "character_face",   "type": "select", "options": ["","western","asian","mixed"], ...},
-        {"name": "character_hair_style", "type": "select", "options": ["","long_hair","short_hair","twin_tails","ponytail","bob_with_bangs"], ...},
-        {"name": "character_hair_color", "type": "select", "options": ["","blonde","brown","black","pink","silver","gradient"], ...},
-        {"name": "character_eyes",   "type": "select", "options": ["","large_eyes","sharp_eyes","upturned","downturned"], ...},
-        {"name": "character_outfit", "type": "select", "options": ["","casual","fantasy","school_uniform","sportswear","dress","cyberpunk"], ...},
-        # 카테고리 3 — 촬영 기법
-        {"name": "camera_angle",       "type": "select", "options": ["","front","side","from_above","from_below","dramatic_low"], ...},
-        {"name": "camera_composition", "type": "select", "options": ["close_up","upper_body","full_body","wide_shot"], ...},
-        {"name": "depth_of_field",     "type": "select", "options": ["","bokeh","pan_focus"], ...},
-        # 카테고리 4 — 조명
-        {"name": "lighting", "type": "select",
-         "options": ["natural_day","golden_hour","night","indoor","dramatic","soft","backlit","studio","neon"], ...},
-        # 카테고리 5 — 배경
-        {"name": "background", "type": "select",
-         "options": ["","classroom","cafe","bedroom","office","city_street","nature_park","beach","mountain_forest",
-                     "castle","magical_realm","otherworldly","plain_background","abstract"], ...},
-        # 카테고리 6 — 동영상 모션 (동영상 선택 시만 적용)
-        {"name": "motion_intensity", "type": "select", "options": ["subtle","moderate","dynamic"], ...},
-        {"name": "motion_type", "type": "select", "options": ["camera_movement","character_movement","particle_environment"], ...},
-        {"name": "loop_animation", "type": "select", "options": ["true","false"], "default": "false", ...},
-        # 카테고리 7 — 디테일 향상 LoRA (복수 선택)
-        {"name": "detail_loras", "type": "list", "default": "",
-         "description": "쉼표 구분 다중 선택 (예: detail_tweaker,add_more_details)", ...},
-        # 추가 설명 및 공통 파라미터
-        {"name": "user_description", "type": "textarea", "default": "", ...},
-        {"name": "width",     "type": "integer", "default": 512, ...},
-        {"name": "height",    "type": "integer", "default": 768, ...},
-        {"name": "steps",     "type": "integer", "default": 20, ...},
-        {"name": "cfg_scale", "type": "integer", "default": 7, ...},
-        {"name": "seed",      "type": "integer", "default": -1, ...},
-        # 동영상 전용
-        {"name": "video_length", "type": "integer", "default": 16, ...},
-        {"name": "fps",          "type": "integer", "default": 8, ...},
-    ],
-}
+한국어 지원 테스트:
+  from kokoro import KPipeline
+  pipeline = KPipeline(lang_code='ko')
+  result = pipeline("안녕하세요 테스트입니다")
 ```
 
-#### 3-3-B. `pipelines/f003_video_creation/config.json` 설계
+### FFmpeg (STAGE_05 필수)
 
-스타일 매핑 테이블을 JSON 파일로 외부 관리한다.
+```
+winget install "FFmpeg (Essentials Build)"
+# PATH 등록 확인: ffmpeg -version
+```
+
+### Whisper (STAGE_05 자막)
+
+```
+pip install openai-whisper         # 표준
+# 또는
+pip install faster-whisper          # CUDA 가속 권장
+
+모델 크기 선택 (config.json의 whisper_model):
+  base:   141MB VRAM, 빠름, 정확도 보통
+  medium: 769MB VRAM, 느림, 정확도 높음
+  large-v3: ~10GB -- 일반 환경 사용 불가
+  기본값: base (VRAM 4GB 이하 환경)
+```
+
+### YouTube Data API v3
+
+```
+pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+
+설정 절차:
+1. Google Cloud Console → YouTube Data API v3 활성화
+2. OAuth 2.0 클라이언트 ID 생성 (데스크톱 앱 유형)
+3. client_secrets.json 다운로드 → 프로젝트 루트 (.gitignore에 추가)
+4. 첫 실행 시 브라우저 OAuth 완료 → refresh_token을 settings 테이블에 저장
+
+일일 유닛 한도 관리:
+  videos.insert: 1,600유닛 | thumbnails.set: 50유닛 | search.list: 100유닛
+  합계 10,000유닛/일 → 업로드 약 6회 + 검색 약 17회
+  settings 테이블 key='youtube_quota_used_today'로 일일 소모량 추적
+```
+
+### F001 config.json
 
 ```json
 {
   "comfyui_url": "http://localhost:8188",
-  "comfyui_manager_url": "http://localhost:8188",
-  "comfyui_path": "C:\\ComfyUI",
-  "output_dir": "C:\\Develop\\Dash\\storage\\results\\f003",
-  "ollama_url": "http://localhost:11434",
-  "default_motion_module": "mm_sd_v15_v2.ckpt",
-  "reboot_poll_interval_sec": 5,
-  "reboot_timeout_sec": 120,
-  "style_mapping": {
-    "anime":     {"checkpoint": "anime_art_diffusion_xl.safetensors", "base_model": "SDXL",
-                  "style_loras": [{"name": "aesthetic_anime.safetensors", "strength_model": 0.7, "strength_clip": 0.5}],
-                  "prompt_keywords": ["anime style", "anime coloring", "cel shading"]},
-    "realistic": {"checkpoint": "cyberrealisticPony.safetensors", "base_model": "SD1.5",
-                  "style_loras": [],
-                  "prompt_keywords": ["photorealistic", "hyperrealistic", "RAW photo"]},
-    "fantasy":   {"checkpoint": "fantasiaXL.safetensors", "base_model": "SDXL",
-                  "style_loras": [{"name": "alpha_fantasy_touch.safetensors", "strength_model": 0.6, "strength_clip": 0.4}],
-                  "prompt_keywords": ["fantasy art", "magical", "ethereal", "painterly"]},
-    "cyberpunk": {"checkpoint": "cyberrealisticPony.safetensors", "base_model": "SD1.5",
-                  "style_loras": [{"name": "cyberpunk_anime.safetensors", "strength_model": 0.7, "strength_clip": 0.5}],
-                  "prompt_keywords": ["cyberpunk", "neon lights", "futuristic city"]},
-    "watercolor":{"checkpoint": "landscapeAnimePro.safetensors", "base_model": "SD1.5",
-                  "style_loras": [],
-                  "prompt_keywords": ["watercolor painting", "soft brushstrokes"]},
-    "3d_render": {"checkpoint": "sdxl_base.safetensors", "base_model": "SDXL",
-                  "style_loras": [],
-                  "prompt_keywords": ["3D render", "CGI", "unreal engine"]},
-    "pixel_art": {"checkpoint": "pixel_art_diffusion_xl.safetensors", "base_model": "SDXL",
-                  "style_loras": [{"name": "pixel_art_anime_screencap.safetensors", "strength_model": 0.8, "strength_clip": 0.6}],
-                  "prompt_keywords": ["pixel art", "8-bit", "retro game"]}
-  },
-  "detail_lora_mapping": {
-    "detail_tweaker":    {"filename": "detail_tweaker_sd15.safetensors", "base_models": ["SD1.5"], "default_weight": 1.0},
-    "detail_tweaker_xl": {"filename": "detail_tweaker_xl.safetensors",   "base_models": ["SDXL"],  "default_weight": 1.5},
-    "add_more_details":  {"filename": "add_more_details.safetensors",    "base_models": ["SD1.5"], "default_weight": 0.7},
-    "flux_image_upgrader":{"filename":"flux_image_upgrader.safetensors", "base_models": ["Flux.1","SDXL","SD1.5"], "default_weight": 0.7},
-    "detailifier":       {"filename": "detailifier.safetensors",         "base_models": ["Flux.1","SD3.5","SDXL","SD1.5"], "default_weight": 0.7}
-  },
-  "motion_module_mapping": {
-    "SD1.5": "mm_sd_v15_v2.ckpt",
-    "SDXL":  "mm_sdxl_v10_beta.ckpt"
-  },
-  "flux_model": {
-    "diffusion_model": "flux1-dev-fp8.safetensors",
-    "vae":             "ae.safetensors",
-    "clip_l":          "clip_l.safetensors",
-    "t5xxl":           "t5xxl_fp8_e4m3fn.safetensors"
-  }
+  "comfyui_path": "D:\\comfyui\\ComfyUI",
+  "whisper_model": "base",
+  "tts_default_provider": "coqui",
+  "tts_coqui_model": "tts_models/ko/css10/vits",
+  "bgm_dir": "storage/bgm",
+  "output_base_dir": "storage/results/f001"
 }
 ```
 
-#### 3-3-C. `pipelines/f003_video_creation/comfyui_client.py` 설계
+---
 
-ComfyUI REST API + WebSocket 클라이언트. 동기 httpx + websocket-client 사용.
+## 섹션 10. 구현 순서 (Phase별)
 
-| 메서드 | 설명 | HTTP |
-|--------|------|------|
-| `health_check()` | ComfyUI 헬스체크 | GET /system_stats → 200 확인 |
-| `get_object_info()` | 로드된 노드 타입 및 사용 가능 모델 목록 | GET /object_info |
-| `get_available_checkpoints()` | CheckpointLoaderSimple의 ckpt_name 목록 추출 | object_info 파싱 |
-| `get_available_loras()` | LoraLoader의 lora_name 목록 추출 | object_info 파싱 |
-| `submit_workflow(workflow_dict)` | 워크플로우 JSON 제출 → prompt_id 반환 | POST /prompt |
-| `wait_for_completion(prompt_id, timeout, cancel_check_fn)` | WebSocket 완료 이벤트 감지, 취소 감지 병행 | WS /ws?clientId={uuid} |
-| `get_history(prompt_id)` | 실행 결과 및 출력 파일명 조회 | GET /history/{prompt_id} |
-| `download_output(filename, subfolder, file_type)` | 결과 파일 다운로드 → 바이트 반환 | GET /view?filename=&type=output |
-| `reboot(manager_url)` | ComfyUI 재시작 요청 | POST /manager/reboot |
-| `wait_for_ready(timeout)` | 재시작 완료 폴링 | GET /system_stats 반복 |
+### Phase 1 — DB + API 뼈대 [2일] ✅ 구현완료 (2026-05-12)
 
-WebSocket 이벤트 처리 핵심:
-```python
-# WebSocket 완료 감지 로직 개요
-def wait_for_completion(self, prompt_id: str, timeout: int, cancel_check_fn=None) -> None:
-    client_id = str(uuid.uuid4())
-    ws_url = f"ws://localhost:8188/ws?clientId={client_id}"
-    # websocket-client 라이브러리 사용
-    # "executed" 이벤트의 prompt_id 일치 시 반환
-    # "execution_error" 이벤트 수신 시 RuntimeError 발생
-    # 1초 주기로 cancel_check_fn(task_id) 호출하여 취소 감지
-    # timeout 초과 시 TimeoutError 발생
-```
+**목표**: 파이프라인 없이 CRUD만으로 content_jobs + stages 레코드 생성/조회 동작 확인
 
-#### 3-3-D. `pipelines/f003_video_creation/model_manager.py` 설계
+1. `backend/core/database.py` 수정 ✅
+   - `_CREATE_CONTENT_JOBS`, `_CREATE_STAGES`, 인덱스 3개 추가 + `init_db()` 확장
 
-| 메서드 | 설명 |
-|--------|------|
-| `scan_local_models(comfyui_path)` | ComfyUI/models/ 디렉토리 스캔 → DB model_inventory 갱신 |
-| `is_model_available(filename, model_type)` | DB 조회 + 파일 시스템 존재 여부 확인 |
-| `ensure_models(required_models, comfyui_client)` | 없는 모델 다운로드 + ComfyUI 재시작 |
-| `download_from_civitai(version_id, model_type, target_path)` | httpx 스트리밍, DB progress_pct 업데이트 |
-| `download_from_hf(repo_id, filename, local_dir)` | hf_hub_download 래퍼 |
-| `_update_download_queue(queue_id, status, progress, error)` | model_download_queue 테이블 업데이트 |
+2. `backend/schemas/f001.py` 신규 생성 ✅
+   - `F001JobCreateRequest`, `ContentJobResponse`, `StageResponse`, `ContentJobListResponse` 등
 
-다운로드 청크 처리 전략:
-- `httpx.Client` + `client.stream("GET", url)` 사용
-- 청크 크기: 1MB (`chunk_size = 1024 * 1024`)
-- `Content-Length` 헤더로 전체 파일 크기 파악
-- 청크마다 `progress_pct = downloaded_bytes / total_bytes * 100` 계산 후 DB 업데이트
+3. `backend/services/f001_service.py` 신규 생성 ✅
+   - `create_job()`: content_jobs INSERT + stages 6개 PENDING INSERT
+   - `list_jobs()`: cursor 페이징 (task_service.list_tasks() 동일 패턴)
+   - `get_job()`: content_jobs + stages JOIN 조회
 
-#### 3-3-E. `pipelines/f003_video_creation/style_mapper.py` 설계
+4. `backend/routers/f001.py` 신규 생성 ✅ (14개 엔드포인트, 파이프라인 연결 없이 CRUD만)
 
-`config.json`의 스타일 매핑 테이블을 참조하여 ComfyUI 워크플로우 파라미터를 결정한다.
+5. `backend/main.py` 수정 ✅
+   - `from routers import ..., f001` + `app.include_router(f001.router)`
+   - F001 StaticFiles 마운트 추가
 
-| 메서드 | 입력 | 출력 |
-|--------|------|------|
-| `resolve_checkpoint(art_style)` | "anime" | "anime_art_diffusion_xl.safetensors" |
-| `resolve_base_model(art_style)` | "anime" | "SDXL" |
-| `resolve_style_loras(art_style)` | "anime" | `[{"name": ..., "strength_model": 0.7}]` |
-| `resolve_detail_loras(keys, base_model)` | `["detail_tweaker"]`, "SD1.5" | 호환 필터링 후 LoRA 목록 |
-| `resolve_motion_module(base_model)` | "SD1.5" | "mm_sd_v15_v2.ckpt" |
-| `build_prompt_keywords(params)` | 스타일 선택 dict | `{"positive": [...], "negative": [...]}` |
-| `build_workflow(generation_type, resolved, prompt, params)` | - | 완성된 워크플로우 dict |
-
-`build_workflow` 내부 동작:
-1. `workflows/animatediff_base.json` 또는 `workflows/flux_base.json` 로드
-2. 체크포인트명, LoRA명+가중치, 프롬프트 텍스트, KSampler 파라미터 교체
-3. 디테일 향상 LoRA를 스타일 LoRA 체인 뒤에 동적 삽입
-4. 동영상: AnimateDiff 노드의 모션 모듈명, context_frames, closed_loop 설정
-
-#### 3-3-F. `pipelines/f003_video_creation/prompt_generator.py` 설계
-
-```python
-# SD/AnimateDiff 경로 — 포지티브/네거티브 분리
-def generate_sd_prompt(style_context: dict, user_description: str) -> dict:
-    # 반환: {"positive": "masterpiece, best quality, ...", "negative": "..."}
-    # Ollama /api/chat, format="json"
-
-# Flux.1 경로 — 단일 자연어
-def generate_flux_prompt(style_context: dict, user_description: str) -> str:
-    # 반환: "A detailed illustration of a young woman with..."
-    # Ollama /api/chat, format="json", {"prompt": "..."} 형태
-
-# 응답 파싱 3단계 폴백
-# 1. json.loads(response) 직접 파싱
-# 2. ```json ... ``` 블록 정규표현식 추출
-# 3. { ... } 사이 텍스트 추출
-```
-
-#### 3-3-G. `pipelines/f003_video_creation/pipeline.py` — F003Pipeline 설계
-
-```python
-class F003Pipeline(BasePipeline):
-    def get_metadata(self) -> dict:
-        return {"feature_id": "F003", "name": "영상제작", "supports_schedule": False, ...}
-
-    def run(self, task_id: int, params: dict) -> dict:
-        # 1. update_status(task_id, "RUNNING")
-        # 2. config.json 로드
-        # 3. ComfyUI 헬스체크 → 실패 시 FAILED
-        # 4. style_mapper로 체크포인트/기반모델/LoRA 결정
-        # 5. model_manager.ensure_models() → 없는 모델 다운로드 + ComfyUI 재시작
-        # 6. prompt_generator로 Ollama 프롬프트 생성
-        # 7. style_mapper.build_workflow()로 워크플로우 JSON 조립
-        # 8. comfyui_client.submit_workflow(workflow) → prompt_id
-        # 9. comfyui_client.wait_for_completion(prompt_id, cancel_check_fn=self.is_cancelled)
-        # 10. get_history(prompt_id) → 출력 파일명
-        # 11. download_output(filename) → 바이트
-        # 12. storage/results/f003/{task_id}_*.{ext} 저장
-        # 13. update_status("DONE", result={"file_path": ..., "generation_type": ...})
-```
-
-예외 처리: 각 단계마다 `is_cancelled(task_id)` 체크 → 취소 시 CANCELLED 처리. 모든 예외는 FAILED 처리.
-
-#### 3-3-H. `backend/services/model_service.py` 설계
-
-model_inventory 테이블 CRUD (aiosqlite 비동기):
-- `list_models(db, model_type=None, base_model=None)` → 필터 조회
-- `get_model_by_filename(db, filename)` → 파일명 단건 조회
-- `upsert_model(db, model_data)` → INSERT or UPDATE
-- `set_downloaded(db, model_id, local_path)` → is_downloaded=1 업데이트
-
-#### 3-3-I. `backend/services/download_service.py` 설계
-
-- `enqueue(db, source, model_type, source_id, target_path)` → 큐 추가, id 반환
-- `list_active_downloads(db)` → QUEUED/DOWNLOADING 목록
-- `update_progress(db, queue_id, progress_pct)` → 진행률 업데이트
-- `mark_done(db, queue_id)` → DONE + finished_at
-- `mark_failed(db, queue_id, error_message)` → FAILED
-
-다운로드 실행은 파이프라인 프로세스(model_manager.py) 내에서 동기 httpx로 처리.
-
-#### 3-3-J. `backend/routers/model_assets.py` 설계
-
-```python
-router = APIRouter(prefix="/api/model-assets", tags=["model-assets"])
-
-# 모델 인벤토리 목록 조회
-@router.get("", response_model=list[ModelInventoryResponse])
-async def list_model_assets(model_type: str | None = None, base_model: str | None = None, ...)
-
-# 진행 중인 다운로드 목록 조회
-@router.get("/downloads", response_model=list[DownloadQueueResponse])
-async def list_downloads(db: aiosqlite.Connection = Depends(get_db))
-
-# 다운로드 트리거 (파이프라인 외부에서 수동 다운로드 시)
-@router.post("/download", status_code=202)
-async def trigger_download(request: DownloadRequest, ...)
-
-# 로컬 모델 스캔 (ComfyUI/models/ 디렉토리 재스캔)
-@router.post("/scan", status_code=202)
-async def scan_local_models(...)
-```
-
-#### 3-3-K. `backend/main.py` 변경
-
-```python
-# 추가
-from routers import model_assets
-
-# app.include_router 추가
-app.include_router(model_assets.router)
-
-# 결과 파일 정적 서빙 (F003 결과 이미지/동영상)
-from fastapi.staticfiles import StaticFiles
-app.mount("/results/f003", StaticFiles(directory=r"C:\Develop\Dash\storage\results\f003"), name="f003_results")
-```
-
-#### 3-3-L. `pipelines/runner.py` — F003 등록
-
-```python
-# F003 — 영상제작
-try:
-    from pipelines.f003_video_creation.pipeline import F003Pipeline
-    registry["F003"] = F003Pipeline
-    logger.info("파이프라인 등록 완료: F003 (영상제작)")
-except ImportError as e:
-    logger.warning(f"F003 파이프라인 로드 실패: {e}")
-```
-
-#### 3-3-M. `frontend/src/router/index.js` — F003 라우트 추가
-
-```javascript
-import F003View from '../views/F003View.vue'
-
-// 순서 주의: /features/F003 이 /features/:id 보다 먼저 등록
-{
-  path: '/features/F003',
-  name: 'F003Feature',
-  component: F003View,
-},
-{
-  path: '/features/:id',
-  name: 'Feature',
-  component: FeatureView,
-},
-```
-
-#### 3-3-N. `frontend/src/views/F003View.vue` 설계
-
-다단계 폼 구조 (`<script setup>`):
-
-**Step 1: 생성 유형 선택**
-- 동영상 / 그림 두 개의 큰 카드 클릭 UI
-- `const generationType = ref('image')`
-
-**Step 2: 스타일 선택 (7개 카테고리)**
-- 카테고리 1: 아트 스타일 라디오/칩 (7개)
-- 카테고리 2: 캐릭터 외형 드롭다운 5개 (얼굴/헤어스타일/헤어컬러/눈매/의상)
-- 카테고리 3: 촬영 기법 드롭다운 (앵글/구도/심도)
-- 카테고리 4: 조명 드롭다운 (9개)
-- 카테고리 5: 배경 드롭다운 (13개)
-- 카테고리 6: 동영상 모션 (`v-if="generationType === 'video'"`, 모션 강도/타입/루프)
-- 카테고리 7: 디테일 향상 LoRA 체크박스 (선택된 아트 스타일의 기반 모델과 호환 LoRA만 활성화)
-
-**Step 3: 파라미터 설정**
-- 공통: width, height, steps, cfg_scale, seed
-- 동영상 전용: video_length, fps (`v-if="generationType === 'video'"`)
-- 추가 설명: textarea (한국어 가능)
-
-**실행 섹션**
-```javascript
-async function startGeneration() {
-    const params = {
-        generation_type: generationType.value,
-        art_style: selectedStyle.value,
-        // ... 모든 카테고리 선택값
-        user_description: userDescription.value,
-        width: width.value, height: height.value, steps: steps.value,
-        cfg_scale: cfgScale.value, seed: seed.value,
-        video_length: videoLength.value, fps: fps.value,
-    }
-    const task = await taskStore.createTask('F003', params)
-    router.push({ name: 'TaskDetail', params: { id: task.id } })
-}
-```
-
-다운로드 진행 중 상태 표시: 2초 폴링으로 `/api/model-assets/downloads` 조회, 진행 바 표시.
-
-#### 3-3-O. `frontend/src/views/TaskDetailView.vue` — F003 미디어 렌더링
-
-```javascript
-// computed 추가
-const isF003Result = computed(() =>
-    task.value?.feature_id === 'F003' && parsedResult.value?.file_path
-)
-const f003IsVideo = computed(() =>
-    parsedResult.value?.generation_type === 'video'
-)
-```
-
-```html
-<!-- 결과 카드 F003 분기 -->
-<template v-else-if="isF003Result">
-  <video v-if="f003IsVideo"
-    :src="`/results/f003/${parsedResult.value.file_name}`"
-    controls class="result-media" />
-  <img v-else
-    :src="`/results/f003/${parsedResult.value.file_name}`"
-    alt="생성된 이미지" class="result-media" />
-  <div class="result-meta">
-    생성 유형: {{ parsedResult.value.generation_type }}
-    | 파일: {{ parsedResult.value.file_path }}
-  </div>
-</template>
-```
-
-#### 3-3-P. `workflows/animatediff_base.json` 노드 구성 개요
-
-```
-노드 1: CheckpointLoaderSimple     → ckpt_name (style_mapper 결정)
-노드 2: CLIPTextEncode (positive)  → text (prompt_generator 결정)
-노드 3: CLIPTextEncode (negative)  → text
-노드 4: ADE_LoadAnimateDiffModel   → model_name (motion_module)
-노드 5: ADE_AnimateDiffSamplingSettings → batch_size, seed_override, closed_loop
-노드 6: ADE_ApplyAnimateDiffModel  → ad_model=[4,0], sampling_settings=[5,0]
-노드 7~N: Load LoRA (스타일 LoRA + 디테일 향상 LoRA 체인, 동적 삽입)
-노드X: KSampler → seed, steps, cfg
-노드X+1: VAEDecode
-노드X+2: VHS_VideoCombine → fps, format=video/h264-mp4
-```
-
-#### 3-3-Q. `workflows/flux_base.json` 노드 구성 개요
-
-```
-노드 1: UNETLoader                  → unet_name (flux1-dev-fp8.safetensors)
-노드 2: VAELoader                   → vae_name (ae.safetensors)
-노드 3: CLIPLoader (CLIP-L)         → clip_name
-노드 4: CLIPLoader (T5XXL)          → clip_name
-노드 5~N: LoraLoaderModelOnly (체인) → Flux 스타일 + 디테일 향상 LoRA
-노드K: CLIPTextEncode (positive prompt)
-노드K+1: EmptyLatentImage           → width, height
-노드K+2: KSampler                   → seed, steps, cfg
-노드K+3: VAEDecode
-노드K+4: SaveImage                  → filename_prefix
-```
+**검증**: `POST /api/f001/jobs` → content_jobs 1개 + stages 6개 생성 확인
+`GET /api/f001/jobs?cursor=&limit=20` → cursor 페이징 응답 확인
 
 ---
 
-## 4. 구현 순서 (Phase 단위)
+### Phase 2 — STAGE_01 + STAGE_02 (텍스트 전용, 외부 서비스 없음) [3일]
 
-| Phase | 작업 내용 | 담당 에이전트 | 의존성 | 상태 |
-|-------|---------|-------------|--------|------|
-| P1 | cursor 기반 페이징 전환 (백엔드 4개 파일 + 프론트 3개 파일) | api-builder + web-builder | 없음 | **구현완료** |
-| P2 | DB 스키마 추가 (model_inventory, model_download_queue) | api-builder | 없음 | **구현완료** |
-| P3 | features.py F003 항목 추가 | api-builder | 없음 | **구현완료** |
-| P4 | comfyui_client.py 구현 (REST + WebSocket) | pipeline-builder | 없음 | **구현완료** |
-| P5 | config.json + style_mapper.py 구현 | pipeline-builder | P3 | **구현완료** |
-| P6 | prompt_generator.py 구현 | pipeline-builder | 없음 | **구현완료** |
-| P7 | model_manager.py 구현 | pipeline-builder | P2, P4 | **구현완료** |
-| P8 | animatediff_base.json + flux_base.json 기본 워크플로우 JSON 작성 | pipeline-builder | P4 | **구현완료** |
-| P9 | pipeline.py F003 메인 로직 구현 | pipeline-builder | P4, P5, P6, P7, P8 | **구현완료** |
-| P10 | runner.py F003 등록 | pipeline-builder | P9 | **구현완료** |
-| P11 | backend model_service + download_service 구현 | api-builder | P2 | **구현완료** |
-| P12 | backend model_assets 라우터 + 스키마 구현 | api-builder | P11 | **구현완료** |
-| P13 | main.py model_assets 라우터 + StaticFiles 등록 | api-builder | P12 | **구현완료** |
-| P14 | F003View.vue 프론트엔드 구현 | web-builder | P3, P12 | **구현완료** |
-| P15 | router/index.js F003 라우트 추가 | web-builder | P14 | **구현완료** |
-| P16 | TaskDetailView.vue F003 미디어 렌더링 추가 | web-builder | P14 | **구현완료** |
-| P17 | storage/results/f003/ 디렉토리 생성 확인 | api-builder | 없음 | **구현완료** |
-| P18 | 전체 통합 검토 및 테스트 | critic | P1~P17 | **구현완료** |
+> **✅ 구현완료 (파이프라인 모듈)** — 2026-05-12
 
-**병렬 실행 가능한 Phase 그룹**:
-- 그룹 A (독립): P1, P2, P3, P4, P6, P17 동시 시작 가능
-- 그룹 B (P2, P4 완료 후): P7
-- 그룹 C (P3, P4 완료 후): P5
-- 그룹 D (P5, P6, P7, P8 완료 후): P9 → P10
-- 그룹 E (P2 완료 후): P11 → P12 → P13
-- 그룹 F (P3, P12 완료 후): P14 → P15, P16
+**목표**: SearXNG + Ollama만으로 주제 발굴 → 스크립트 생성 전체 흐름 동작
+
+1. ✅ `pipelines/f001_youtube/stages/__init__.py` — BaseStage, ValidationResult 정의
+2. ✅ `pipelines/f001_youtube/stages/stage01_research.py` — SearXNG 먼저 구현
+3. ✅ `pipelines/f001_youtube/stages/stage02_script.py` — Ollama 스크립트 + 씬 분해
+4. ✅ `pipelines/f001_youtube/validators/stage_validator.py` — handle_rejection() 구현
+5. ✅ `pipelines/f001_youtube/run_orchestrator.py` — `argv[1]=job_id` → `F001Orchestrator().run(job_id)` 호출 진입점
+6. ✅ `pipelines/f001_youtube/orchestrator.py` — 6스테이지 전체 오케스트레이터 구현
+7. 프론트엔드 기본 UI: `F001View.vue`, `F001JobDetailView.vue`, `store/f001.js` (별도 진행)
+8. `router/index.js` + `DashboardView.vue` 수정 (별도 진행)
+
+**검증**: 작업 생성 → STAGE_01 완료(주제 목록 DB 저장) → 주제 선택 → STAGE_02 시작 → 스크립트 DB 저장
 
 ---
 
-## 5. 고려사항 및 트레이드오프
+### Phase 3 — STAGE_03 TTS + STAGE_04 영상 생성 [4일]
 
-### 5-1. ComfyUI 재시작 의존성
+> **✅ 구현완료 (파이프라인 모듈)** — 2026-05-12
 
-모델 추가 시마다 ComfyUI 서버 재시작이 필요하다. Flux.1 전체 모델 세트 다운로드 후 재시작까지 약 2~5분 소요 예상.
-- F003View에서 다운로드 진행 바(2초 폴링) + "ComfyUI 재시작 중..." 스피너 표시
-- 타임아웃 120초 초과 시 FAILED 처리
+**목표**: Coqui TTS 보이스오버 + ComfyUI 씬별 이미지 클립 생성
 
-### 5-2. 워크플로우 JSON 유지보수
+1. Coqui TTS 설치 + subprocess 연동 테스트 (런타임 검증 별도)
+2. ✅ `pipelines/f001_youtube/stages/stage03_tts.py` — coqui/kokoro/elevenlabs/openai 분기 + skip 처리
+3. ComfyUI 연동 확인 (`D:\comfyui\ComfyUI`, 포트 8188, F003 ComfyUIClient import 테스트) (런타임 검증 별도)
+4. ✅ `pipelines/f001_youtube/stages/stage04_video.py` — ComfyUI 이미지 생성 + text_slide/script_only skip
+5. ✅ `orchestrator.py` 확장 — STAGE_03/04 실행 포함한 6스테이지 전체 구현 완료
+6. `frontend/src/components/StageTimeline.vue` — 6단계 세로 스텝 컴포넌트 (별도 진행)
 
-ComfyUI 버전 업 시 노드 클래스 타입명이 변경될 수 있다.
-- `workflows/` 디렉토리 JSON을 코드베이스 외부로 관리하여 재빌드 없이 수정 가능
-- `GET /object_info`로 사전 파라미터명 검증 후 워크플로우 제출 권장
-
-### 5-3. 단일 ComfyUI 인스턴스 큐 처리
-
-ComfyUI 내부 큐로 동시 요청은 순차 처리됨. 파이프라인은 자신의 prompt_id WebSocket 이벤트만 감지하므로 동시성 문제 없음. 향후 `GET /queue`로 대기 상태 UI 표시 가능.
-
-### 5-4. 다운로드 용량 경고
-
-| 모델 | 크기 | 예상 시간 (100Mbps) |
-|------|------|-------------------|
-| Flux.1 FP8 전체 세트 | ~22GB | ~30분 |
-| SD 1.5 체크포인트 | 2~7GB | 3~10분 |
-| AnimateDiff 모션 모듈 | ~1.7GB | ~2분 |
-
-F003View에서 필요 모델 목록 + 예상 다운로드 크기 표시 후 사용자 확인 권장.
-
-### 5-5. CivitAI API 키 및 HuggingFace 토큰
-
-`.env` 파일에 `CIVITAI_API_KEY`, `HF_TOKEN` 추가 필요. 미설정 시 다운로드 시 RuntimeError → task FAILED.
-
-### 5-6. 기반 모델별 LoRA 호환성 필터링
-
-SD 1.5 LoRA는 SDXL/Flux.1 에서 사용 불가. `style_mapper.resolve_detail_loras()`에서 기반 모델 기준 필터링 필수. F003View 카테고리 7 UI에서도 호환 LoRA만 활성화.
+**검증**: STAGE_02 완료 후 STAGE_03/04 실행 → voiceover.mp3 + scene_*.png 파일 생성 확인
 
 ---
 
-## 6. 완성도 자기 검토 체크리스트
+### Phase 4 — STAGE_05 편집 + STAGE_06 업로드 [4일]
 
-- [x] cursor 기반 페이징: 5개 파일 경로 + 코드 스니펫 완전 포함
-- [x] F003 파이프라인: 9개 신규 파일 설계 상세 포함
-- [x] 수정 파일 목록 완전 (12개 파일)
-- [x] 구현 순서 Phase 18단계 + 병렬 실행 그룹 명시
-- [x] 트레이드오프 분석 6개 항목
-- [x] DB 스키마 SQL 스니펫 포함
-- [x] F003View 다단계 설계 포함
-- [x] TaskDetailView F003 미디어 렌더링 설계 포함
-- [x] 스타일 매핑 7개 카테고리 input_schema 포함
-- [x] config.json 스타일 매핑 테이블 구조 포함
-- [x] ComfyUI 워크플로우 JSON 노드 구성 개요 포함
-- [x] runner.py F003 등록 스니펫 포함
-- [x] main.py StaticFiles 마운트 포함
-- [x] 외부 의존성 명시
+> **✅ 구현완료 (파이프라인 모듈)** — 2026-05-12
+
+**목표**: 최종 MP4 파일 + SEO 메타데이터 + PENDING_APPROVAL 흐름
+
+1. FFmpeg PATH 확인 + Whisper 설치 테스트 (런타임 검증 별도)
+2. ✅ `pipelines/f001_youtube/stages/stage05_edit.py` — FFmpeg 편집 + Whisper 자막 + skip 체인 처리
+3. ✅ `pipelines/f001_youtube/stages/stage06_upload.py` — Ollama SEO 생성 + upload_mode 분기 (YouTube OAuth는 Phase 5)
+4. `backend/routers/f001.py`의 `approve_job()` 실제 YouTube 업로드 연결 (별도 진행)
+5. `frontend/src/components/StageResultViewer.vue` — 스테이지별 결과 뷰어 (별도 진행)
+   - STAGE_01: 주제 카드 + 선택 버튼
+   - STAGE_02: 훅/본문/CTA 스크립트 뷰
+   - STAGE_03: HTML audio 플레이어
+   - STAGE_04: 이미지 그리드
+   - STAGE_05: HTML video 태그 + SRT 텍스트
+   - STAGE_06: SEO 편집 폼 + 승인/거부 버튼
+
+**검증**: STAGE_05 → output.mp4 생성, STAGE_06 → SEO 메타 + PENDING_APPROVAL 상태 확인
 
 ---
 
-*문서 완성도: 97% — 구현에 필요한 모든 파일 경로, 코드 스니펫, 설계 상세, 순서, 트레이드오프가 포함됨.*
+### Phase 5 — 마무리 + 레거시 통합 [2일]
+
+1. YouTube OAuth 2.0 인증 흐름 구현 (refresh_token → settings 테이블 저장) — 미구현 (구조만 존재)
+2. ✅ 레거시 하이브리드 통합 뷰어 (`Promise.allSettled()` 병렬 조회) — F001View.vue에 구현됨
+3. ✅ `POST /api/f001/migrate-legacy` 선택적 마이그레이션 엔드포인트 — stub 구현 + migrate_legacy.py 유틸 생성
+4. 전체 에러 처리 강화 + 재시도 UI — 기본 구현됨, 강화 여지 있음
+5. ✅ YouTube Data API 유닛 추적 (`GET /api/f001/youtube/quota`) — 구현됨
+
+**검증**: 전체 6단계 파이프라인 UI 완전 모니터링, 승인 후 업로드 동작 확인
 
 ---
 
-## F003-V2: 모델 선택 UI + LoRA 강도 슬라이더
+## 섹션 11. 트레이드오프 및 리스크
 
-| 필드 | 내용 |
-|------|------|
-| 문서명 | F003 모델 선택 & LoRA 강도 구현 계획 |
-| 버전 | V2 |
-| 날짜 | 2026-05-08 |
-| 작성자 | Claude (kisuc 승인) |
-| 문서 유형 | 추가 기능 구현 계획 |
-| 모델 | claude-sonnet-4-6 |
+### 독립 `content_jobs` 테이블 vs 기존 `tasks` 확장
 
-### 요구사항
+| 항목 | content_jobs 신규 (선택) | tasks 확장 |
+|------|--------------------------|------------|
+| 기존 코드 영향 | 없음 (F002/F003 무관) | F002/F003 라우터/스키마도 수정 필요 |
+| 스테이지별 추적 | stages 테이블로 완전 지원 | 컬럼 추가로 어렵게 구현 |
+| 레거시 하이브리드 | legacy_task_id 컬럼으로 연결 가능 | 자연스럽게 통합 |
+| **결정** | **content_jobs 신규 채택** | - |
 
-| 번호 | 요구사항 | 영향 범위 |
-|------|---------|----------|
-| R1 | ComfyUI 설치 Checkpoint/VAE/CLIP 목록을 UI 드롭다운으로 표시 및 선택 | 백엔드 + 프론트엔드 |
-| R2 | 선택한 커스텀 모델이 실제 파이프라인 실행에 반영 | pipeline.py + style_mapper.py |
-| R3 | LoRA 개별 강도 슬라이더 0.0~2.0 | 프론트엔드 + 백엔드 인터페이스 |
+### ComfyUI 씬별 호출 직렬 vs 병렬
 
-### 구현 순서 (의존 관계 기준)
+- **직렬 (현재 F003 패턴)**: 구현 단순, 씬 10개 × 30초 = 5분 소요
+- **병렬 ThreadPoolExecutor**: 처리 시간 단축, ComfyUI 메모리 경합 위험
+- **결정**: Phase 3에서 직렬 먼저 구현 → 성능 이슈 시 병렬 전환
+- **리스크**: ComfyUI 단일 GPU 독점 사용으로 병렬 요청이 내부 큐잉될 수 있음
 
-```
-Step 1 → comfyui_client.py: get_available_vaes(), get_available_clips() 추가
-Step 2 → features.py: GET /api/features/f003/models 엔드포인트 추가 (Step1 의존)
-Step 3 → api/index.js: getF003Models() 추가 (Step2 의존)
-Step 4 → style_mapper.py: custom_checkpoint/vae 반영, LoRA strength 객체 지원
-Step 5 → pipeline.py: params 전달 및 detail_loras JSON 파싱
-Step 6 → F003View.vue: 모델 드롭다운 + LoRA 슬라이더 (Step3,4,5 의존)
-```
+### Whisper 모델 크기 메모리 이슈
 
-### 핵심 설계: LoRA 강도 흐름 변경
+- `large-v3`: ~10GB VRAM → 일반 환경 사용 불가
+- `medium`: 769MB VRAM → RTX 3060 12GB에서 가능
+- `base`: 141MB VRAM → 거의 모든 환경에서 동작
+- **결정**: config.json `whisper_model=base` 기본, 사용자 변경 가능
+- **리스크**: base 모델은 한국어 기술 용어 오인식 가능성 있음
 
-```
-[기존]
-selectedDetailLoras = ['key1', 'key2']
-→ detail_loras: 'key1,key2'
-→ resolve_detail_loras(keys) → config.json default_weight 고정 사용
+### YouTube API 일일 유닛 한도
 
-[변경]
-selectedDetailLoras = [{key:'k1', strength:1.2}, {key:'k2', strength:0.8}]
-→ detail_loras: '[{"key":"k1","strength":1.2},{"key":"k2","strength":0.8}]'
-→ _parse_detail_loras() → resolve_detail_loras(items) → 사용자 strength 사용
-```
+- 업로드 1,600유닛 + 검색 100유닛 = 하루 6영상 + 17회 검색 한도
+- **리스크**: 테스트 중 할당량 소진 시 하루 전체 기능 차단
+- **대응책**:
+  1. Phase 1~4 개발 중 YouTube API 호출 없이 mock 데이터로 테스트
+  2. STAGE_01의 `search_provider` 기본값 `'searxng'`로 시작
+  3. settings 테이블에 일일 소모량 추적 + UI에 잔여 유닛 표시
 
-### 핵심 설계: VAE 노드 동적 삽입
+### Coqui TTS 한국어 품질 리스크
 
-현재 SD 워크플로우에서 VAEDecode(노드6)는 체크포인트 내장 VAE를 사용한다.
-custom_vae 지정 시 VAELoader 노드를 동적으로 삽입하고 VAEDecode의 vae 입력을 교체한다.
+- `css10/vits` 모델: 명확하나 자연스러움 부족, 기계적 억양
+- **대응책**: `tts_provider` 파라미터로 언제든 교체 가능 (코드 변경 불필요)
+- 기본 skip 옵션 제공으로 TTS 없이도 전체 파이프라인 동작 가능
 
-```
-체크포인트 노드1 → VAEDecode 노드6 (기본: ["1", 2])
-                ↓ custom_vae 적용 시
-VAELoader 노드NEW → VAEDecode 노드6 (["NEW", 0])
-```
+### STAGE_03/04 병렬 실행과 SQLite write lock 경합
 
-### CLIP 선택 제약 (V2)
+- 두 스테이지 동시에 stages 테이블 업데이트 시 SQLite write lock 경합 가능
+- **대응책**: SQLite WAL 모드 활성화 (`PRAGMA journal_mode=WAL`) 또는 Phase 3에서 직렬로 시작
+- stages.task_pid 컬럼으로 두 프로세스 PID 별도 추적
 
-SD/SDXL에서 CLIP은 CheckpointLoaderSimple 내장 출력이므로 외부 CLIPLoader 삽입이
-복잡하다. V2에서는 드롭다운을 **정보 표시 전용(disabled)**으로 구현하고 실제 파이프라인에
-반영하지 않는다. UI에 힌트 텍스트로 명시한다.
+### stages REJECTED 상태 처리 복잡성
 
-### 라우트 등록 순서 (features.py)
+- STAGE_N REJECTED → 이전 스테이지 PENDING 리셋 → 사용자 개입 대기
+- **리스크**: orchestrator가 장기 대기 시 프로세스 종료
+- **대응책**: orchestrator를 stateless하게 설계 (DB 상태 읽어 현재 위치 파악) → 언제든 재실행 가능
 
-```
-/api/features/f003/models         ← 먼저 (신규)
-/api/features/f003/loras          ← 두 번째
-/api/features/f003/loras/predownload  ← 세 번째
-/api/features/{feature_id}        ← 마지막
-```
+---
 
-### 구현 체크리스트
+## 섹션 12. 미결/보류 사항
 
-- [ ] Step 1: comfyui_client.py — get_available_vaes(), get_available_clips() 추가
-- [ ] Step 2: features.py — GET /api/features/f003/models 엔드포인트 추가
-- [ ] Step 3: api/index.js — getF003Models() 추가
-- [ ] Step 4-A: style_mapper.py — _parse_detail_loras() 헬퍼 추가
-- [ ] Step 4-B: style_mapper.py — resolve_detail_loras() items 파라미터로 변경
-- [ ] Step 4-C: style_mapper.py — _insert_vae_node() 헬퍼 추가
-- [ ] Step 4-D: style_mapper.py — build_workflow() custom_checkpoint/VAE 처리
-- [ ] Step 5-A: pipeline.py — _collect_missing_loras() detail_loras 파싱 교체
-- [ ] Step 5-B: pipeline.py — trigger word 수집 파싱 교체
-- [ ] Step 5-C: pipeline.py — custom_checkpoint 우선 검증
-- [ ] Step 5-D: pipeline.py — custom_vae 설치 여부 검증 추가
-- [ ] Step 6-A: F003View.vue — import/ref/함수 추가
-- [ ] Step 6-B: F003View.vue — template 모델 설정 섹션 추가
-- [ ] Step 6-C: F003View.vue — LoRA 슬라이더 추가
-- [ ] Step 6-D: F003View.vue — startGeneration() params 수정
-- [ ] Step 6-E: F003View.vue — CSS 추가
+### YouTube OAuth 2.0 인증 흐름
+
+- 브라우저 기반 OAuth는 서버 환경(headless)에서 직접 실행 불가
+- **해결 방안 후보**:
+  1. 최초 1회만 개발자 PC 브라우저 OAuth 완료 → refresh_token 확보 → settings 테이블 수동 저장
+  2. FastAPI에 OAuth 콜백 엔드포인트 구현 (`/api/f001/youtube/auth/callback`)
+  3. `google-auth-oauthlib`의 `InstalledAppFlow` 사용 (로컬 포트 오픈 방식)
+- **결정 필요**: Phase 4 시작 전 방법 확정
+
+### Kokoro TTS 한국어 실제 지원 여부
+
+- Hexgrad/Kokoro-82M의 한국어 학습 데이터 포함 여부 불확실
+- **확인 방법**: `pip install kokoro soundfile` 후 한국어 텍스트 10문장 테스트
+- 한국어 미지원 시: Coqui TTS 계속 사용 또는 ElevenLabs 전환
+
+### ComfyUI 워크플로우 JSON (F001 전용 필요 여부)
+
+- F003 기존 워크플로우 (캐릭터 이미지 생성용)를 F001에 그대로 재사용 가능 여부 확인 필요
+- 유튜브 배경/인포그래픽 씬은 F003 캐릭터 생성 목적과 다름
+- **결정 필요**: Phase 3 시작 전 F001 전용 워크플로우 JSON 필요 여부 확인
+
+### BGM 소스
+
+- STAGE_05 `bgm_enabled=True` 시 저작권 무료 BGM 파일 필요
+- **현재 미정**: `storage/bgm/` 디렉토리에 .mp3 파일 수동 배치 방식
+- 추천 소스: YouTube 오디오 라이브러리, Pixabay Music, ccMixter
+
+### Whisper faster-whisper vs openai-whisper
+
+- `faster-whisper`는 CUDA 가속으로 4~8배 빠름 (ctranslate2 패키지 의존)
+- **결정 필요**: Phase 4 시작 전 Windows CUDA 환경에서 `pip install faster-whisper` 시도 후 결정
+
+---
+
+*완성도 97% 체크리스트 검토 결과 (독립 검증 후 수정 반영):*
+- [x] 모든 섹션이 실제 읽은 코드를 기반으로 작성됨
+- [x] cursor 기반 페이징이 task_service.list_tasks() 현재 구현 패턴과 일치
+- [x] 6개 스테이지 각각의 입/출력 JSON 스키마 구체적 명시
+- [x] ComfyUI D:\comfyui\ComfyUI 경로 + F003 ComfyUIClient 재활용 방법 명시
+- [x] 반송(reject) 메커니즘 StageValidator.handle_rejection() 코드 스니펫 포함
+- [x] Phase별 구현 순서가 실제 의존성 고려 (DB → API → 스테이지 → UI 순서)
+- [x] 레거시 하이브리드 API 병렬 조회 Promise.allSettled() 스니펫 포함
+- [x] YouTube Data API 유닛 소모량(1,600유닛/업로드, 100유닛/검색) 구현에 반영
+- [x] skip 체인 처리 _handle_skip_chain() 코드 스니펫 명시
+- [x] 트레이드오프 섹션에 content_jobs vs tasks 확장, 병렬 실행, 메모리 이슈 등 실질적 내용 포함
+- [x] 섹션 0 신규 생성 파일 표에 run_orchestrator.py, migrate_legacy.py 추가
+- [x] main.py 라우터 등록 패턴 (한 줄 묶음 import 방식) 명확히 명시
+- [x] BasePipeline.run() 추상 메서드 시그니처 불일치 → # type: ignore[override] 처리 명시
+
+*문서 작성 완료: 2026-05-12 (독립 검증 후 수정)*

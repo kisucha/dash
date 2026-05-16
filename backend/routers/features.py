@@ -365,6 +365,13 @@ FEATURES: dict[str, dict] = {
             },
         ],
     },
+    "F004": {
+        "feature_id": "F004",
+        "name": "유튜브 제작(PPT)",
+        "description": "PPT정보를 배경으로 사용하는 컨텐츠 제작",
+        "supports_schedule": False,
+        "input_schema": [],
+    },
 }
 
 

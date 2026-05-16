@@ -1,0 +1,13 @@
+{
+  "whisper_model": "base",
+  "tts_default_provider": "edge_tts",
+  "tts_coqui_model": "tts_models/ko/css10/vits",
+  "bgm_dir": "storage/bgm",
+  "output_base_dir": "storage/results/f004",
+  "image_search_provider": "searxng",
+  "slide_theme": "dark_blue",
+  "slide_font_path": "",
+  "youtube_client_id": "",
+  "youtube_client_secret": "",
+  "youtube_refresh_token": ""
+}
