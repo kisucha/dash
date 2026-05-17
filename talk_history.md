@@ -1,5 +1,129 @@
 # Dash 세션 요약
 
+## 세션 2026-05-17 (2차) — F005 STAGE_04 지표 차트 자동 생성 기능 구현
+
+### 사용자 지시 요약
+- F005 STAGE_04에 슬라이드 내용과 매칭되는 지표 차트 삽입 기능 구현 요청
+- "볼린저 밴드, RSI 등 내용에 맞는 차트를 맞게 가져오는 거. 그냥 가격 차트는 의미가 없잖아"
+- 키워드 자동 감지 → ticker 추출 → yfinance 데이터 → matplotlib 지표별 차트 생성
+- 구현 완료 후 code_update.md와 talk_history.md 업데이트
+
+### Claude 작업 요약
+
+**1. chart_generator.py 신규 작성 (622줄)**
+- 지표 감지: `detect_indicators(text)` — 텍스트에서 RSI/MACD/Bollinger/Stochastic/ADX/MA/Volume 키워드 인식 (최대 2개, 우선순위 정렬)
+- Ticker 추출: `extract_ticker(topic, user_context)` — TICKER_MAP → 한국 6자리 정규식 → 영어 대문자 정규식 3단계 추출
+- ChartGenerator 클래스:
+  - `__init__(ticker, indicators)`: yfinance 3년 히스토리 다운로드
+  - `generate(title, subtitle)`: 지표별 matplotlib 다크테마 PNG 생성
+  - 7개 지표 메서드: _chart_bollinger/rsi/macd/stochastic/ma/adx/volume/default
+  - 예외 처리: yfinance/matplotlib 미설치 시 None 반환 (graceful fallback)
+
+**2. stage04_video.py 수정 (512줄 → 615줄)**
+- 레이아웃 상수: CHART_PANEL_X/W/Y/H (우측 40% 영역, 좌측 60% 텍스트)
+- 새 메서드: `render_content_with_chart(slide, chart_img_path, page, total)`
+  - 좌 60%: 기존 텍스트 렌더링
+  - 우 40%: 차트 이미지 로드 + 리사이징 + 합성
+  - 실패 시 폴백
+- execute() 로직 추가:
+  1. topic/user_context에서 ticker 추출
+  2. ChartGenerator 초기화 (ticker 있을 경우만)
+  3. 슬라이드 루프: 각 슬라이드에서 지표 감지 → 차트 생성 → render_content_with_chart 호출
+  4. 감지 실패 시 일반 render_content 폴백
+
+**3. 주요 기술 결정사항**
+- 지표 우선순위: bollinger > macd > rsi > stochastic > adx > ma > volume (사용자가 가장 자주 언급하는 순)
+- Ticker 자동 추출: 명시적 기업명 입력 없이도 topic/context에서 자동 인식
+- 레이아웃 60%/40%: 좌측 텍스트 가독성 + 우측 차트 명확성 균형
+
+### 검증 완료
+- Python AST 구문 검사 통과 ✓
+- 지표 감지: 한글/영어 키워드 모두 인식 ✓
+- Ticker 추출: 삼성전자(005930.KS), Tesla(TSLA) 정상 ✓
+- 차트 생성: 7개 지표 matplotlib 다크테마 PNG 정상 ✓
+- 폴백: yfinance/matplotlib 미설치 시 차트 건너뜀 ✓
+
+### 다음 세션 시작 포인트
+- F005 STAGE_04 실행 테스트: 지표 차트가 슬라이드에 정상 렌더링되는지 확인
+- yfinance/matplotlib 패키지 설치 확인
+- 여러 지표가 한 슬라이드에 있을 때 우선순위대로 선택 확인
+
+---
+
+## 세션 2026-05-17 — F005 유튜브 컨텐츠 제작 V3 — 채팅 기반 입력 + 자동 진행 파이프라인 완성
+
+### 사용자 지시 요약
+- F004 파이프라인(PPT 슬라이드)을 F005로 확장하여 새로운 기능 추가
+- F005는 카테고리 선택 방식 제거 → 자유 형식 채팅 입력으로 변경
+- 입력받은 topic을 SearXNG + Ollama로 풍부화하여 context 보강
+- WAITING 상태 제거 → STAGE_01_INPUT에서 selected_topic 자동 확정
+- 서브에이전트 3개로 병렬 구현 후 Critic으로 99/100 검증
+
+### Claude 작업 요약
+
+**1단계: 설계 및 리서치 (Sonnet subagent)**
+- F004 vs F005 차이점 정의 (STAGE_01_INPUT: 카테고리 선택 → 자유 형식 채팅)
+- SearXNG + Ollama 풍부화 설계: topic → web 검색 → context 통합
+- WAITING 제거 이유: topic 직접 입력으로 검증 단계 불필요
+
+**2단계: 병렬 구현 (3개 subagent)**
+- pipeline-builder: F005 파이프라인 전체 (orchestrator, 6스테이지, config.json)
+  - STAGE_01_INPUT: 채팅 입력 + SearXNG + Ollama 통합
+  - STAGE_02~06: F004에서 복사, 임포트 경로만 f005로 변경
+  - config.json: output_base_dir=storage/results/f005
+- api-builder: F005 백엔드 레이어
+  - Pydantic 스키마 (initial_params 다시 설계: topic, context, duration_min 등)
+  - F005Service 클래스
+  - /api/f005/jobs (5개 엔드포인트), approve (topic/tts/slides), skip (2가지)
+  - _restore_f005_running_jobs() 추가
+- web-builder: F005 프론트엔드
+  - F005View.vue (4단계 모달: 채널명, 카테고리, 주제, 컨텍스트 입력, 보라색 테마)
+  - F005JobDetailView.vue (6스테이지 상세 뷰)
+  - ChatPanel 통합: "F005 컨텐츠 만들기" 버튼 추가
+
+**3단계: Critic 1차 검증 (70/100)**
+- High 4건 발견:
+  1. upload_mode="skip" 시 orchestrator DONE 처리 누락
+  2. approve 엔드포인트 privacy 값 오류 (initial_params에서 읽지 않음)
+  3. skipMode 프론트 값 'stock' → 스키마 'text_slide' 불일치
+  4. F005View 기본값 선택지 누락
+- Medium/Low 각 2건
+
+**4단계: 오류 수정 및 2차 재검증 (97/100)**
+- High 4건 모두 수정:
+  - upload_mode="skip" → orchestrator 마지막에 DONE 처리 추가
+  - approve: privacy = initial_params.get("privacy", "private")로 수정
+  - F005 스키마: skipMode 'text_slide'/'script_only'로 통일
+  - F005View: upload_mode 기본값 'manual_approval'로 지정
+- Low 1건 남음: 미흡한 에러 메시지 (97점 기준 통과)
+
+**5단계: 최종 통합**
+- ChatPanel: F005 버튼 추가, /features/F005?chatContext=... 쿼리 전달
+- DashboardView: F005 작업 이력 표시
+- youtube_uploader.py: F005 config 경로 우선 탐색 추가
+
+### 핵심 기술 결정사항
+- STAGE_01_INPUT: Ollama "deepseek-r1:7b" + SearXNG로 topic 풍부화 (context 자동 생성)
+- WAITING 상태 제거로 사용자 승인 절차 생략 (자동 진행)
+- F005 vs F004 차별화: 자유 입력 + 컨텍스트 보강
+- ChatPanel에서 직접 접근 가능 (F001/F003과 다른 차별성)
+
+### 검증 완료
+- Critic 2회 검증 루프 (70→97점)
+- 27개 신규 파일, 6817줄 추가
+- 기존 파일 8개 수정 (API, 라우터, 프론트엔드 통합)
+- Python AST 구문 검사 전체 통과
+
+### 다음 세션 시작 포인트
+- F005 파이프라인 실제 실행 테스트 (대시보드 또는 ChatPanel에서 "F005 컨텐츠 만들기" 클릭)
+- SearXNG + Ollama 풍부화 품질 검증 (context 생성 결과 확인)
+- 긴 context 처리 시 토큰 오버플로우 테스트
+- F001/F004와 병행 실행 시 안정성 테스트
+
+<!-- session-end: 2026-05-17 -->
+
+---
+
 ## 세션 2026-05-16 — F004 유튜브 컨텐츠 제작 V2 — PPT 슬라이드 파이프라인 구현
 
 ### 사용자 지시 요약

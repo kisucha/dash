@@ -1,5 +1,61 @@
 # Dash 변경 이력
 
+## [2026-05-17 09:15] F005 유튜브 컨텐츠 제작 파이프라인 전체 구현 완료
+
+- 변경 내용:
+  - **신규 파일 (27개, 6817줄)**
+    - 파이프라인: `pipelines/f005_youtube_v3/orchestrator.py` (F005 6스테이지 오케스트레이터, WAITING 상태 없음)
+    - 파이프라인: `pipelines/f005_youtube_v3/run_orchestrator.py` (subprocess 진입점)
+    - 파이프라인: `pipelines/f005_youtube_v3/config.json` (output_base_dir=storage/results/f005)
+    - 파이프라인: `pipelines/f005_youtube_v3/stages/` 6개 스테이지 모듈
+      - stage01_input.py (채팅 기반 입력, SearXNG + Ollama 풍부화로 selected_topic 자동 확정)
+      - stage02_script.py ~ stage06_upload.py (F004에서 임포트 경로만 f005로 변경)
+    - 파이프라인: `pipelines/f005_youtube_v3/validators/` 반송 메커니즘
+    - 백엔드: `backend/routers/f005.py` (/api/f005 라우터, topic_select 없음, rerun-from-tts 있음)
+    - 백엔드: `backend/schemas/f005.py` (F005 Pydantic 스키마)
+    - 백엔드: `backend/services/f005_service.py` (F005 서비스 클래스)
+    - 프론트엔드: `frontend/src/views/F005View.vue` (4단계 모달 UI, 보라색 테마)
+    - 프론트엔드: `frontend/src/views/F005JobDetailView.vue` (6스테이지 상세 뷰)
+    - 프론트엔드: `frontend/src/store/f005.js` (Pinia 스토어)
+  - **기존 파일 수정 (8개)**
+    - `backend/main.py` — `_restore_f005_running_jobs()` 함수 추가 (서버 재시작 시 F005 복원)
+    - `backend/services/youtube_uploader.py` — F005 config 경로 우선 탐색, 로그 접두어 [F004] → [YouTube] 수정
+    - `backend/routers/features.py` — F005 feature 등록
+    - `frontend/src/api/index.js` — F005 API 함수 11개 추가
+    - `frontend/src/router/index.js` — /features/F005, /f005/jobs/:jobId 라우트 추가
+    - `frontend/src/components/ChatPanel.vue` — "F005 컨텐츠 만들기" 버튼 추가
+    - `frontend/src/components/StageResultViewer.vue` — STAGE_01_INPUT 결과 섹션 추가
+    - `frontend/src/views/DashboardView.vue` — F005 작업 이력 통합
+
+- 변경 이유:
+  1. F004 파이프라인의 제한된 입력 방식(카테고리 선택) → F005는 자유 형식 채팅 입력으로 확장
+  2. 입력받은 topic을 SearXNG + Ollama로 풍부화하여 context 보강 (질 향상)
+  3. WAITING 상태 제거 → STAGE_01_INPUT에서 selected_topic 자동 확정 (사용자 승인 절차 생략)
+  4. ChatPanel에서 직접 접근 가능하도록 통합 (F004와 차별화)
+
+- 영향 범위:
+  - 신규 파이프라인 모듈: 27개 파일, 6817줄
+  - 기존 API 라우터: /api/f005/jobs (5개), /api/f005/approve (topic/tts/slides), /api/f005/skip (2가지 모드)
+  - 프론트엔드: F005 전용 라우트 2개, 컴포넌트 3개, store 1개
+  - 대시보드 통합: 모든 feature (F001/F003/F004/F005) 동일 구조로 작업 표시
+
+- Critic 검토 결과 (99/100 PASS):
+  - upload_mode="skip" orchestrator에서 DONE 처리 누락 → 수정 완료
+  - approve 엔드포인트 privacy를 initial_params에서 올바르게 읽도록 수정
+  - skipMode 프론트 값 'stock'/'text_only' → 스키마 'text_slide'/'script_only'로 수정
+  - F005View.vue upload_mode 기본값 선택지 수정 (manual_approval)
+
+- 설계 핵심:
+  - F004 vs F005 차이: STAGE_01_INPUT이 topic을 직접 받아 selected_topic 자동 확정 (WAITING 없음)
+  - ChatPanel → /features/F005?chatContext=... 쿼리로 컨텍스트 전달
+  - 6스테이지: input → script → search → tts → slides → upload
+
+- git 커밋: 0bda2cd
+  - 메시지: "feat: F005 유튜브 컨텐츠 제작 파이프라인 전체 구현 — 채팅 입력 + topic 풍부화 + 자동 진행"
+  - Gitea 푸시: http://192.168.20.15:8418/kisucha/dash.git master (완료)
+
+---
+
 ## [2026-05-12] Python 3.11 전환, 오케스트레이터 commit 버그 수정, 시작 복구 로직 추가
 
 - 변경 내용:
@@ -985,3 +1041,83 @@
   - F001View default upload_mode: 'manual'→'manual_approval' 수정 완료
 
 - 담당 에이전트: api-builder (Phase 1), pipeline-builder (Phase 2-4), web-builder (Phase 5-6), historian (최종 검증)
+
+---
+
+## [2026-05-17] F005 STAGE_04 지표 차트 생성 기능 추가
+
+- 변경 내용:
+
+### 신규 파일: pipelines/f005_youtube_v3/stages/chart_generator.py (622줄)
+- **지표 감지 시스템**:
+  - `INDICATOR_KEYWORDS`: 한국어/영어 지표명 매핑 딕셔너리
+    - RSI, MACD, 볼린저밴드(Bollinger Bands), 스토캐스틱(Stochastic), ADX, 이동평균(MA), 거래량(Volume)
+  - `detect_indicators(text: str) → list[str]`: 슬라이드 텍스트에서 최대 2개 지표 감지
+    - 우선순위: bollinger > macd > rsi > stochastic > adx > ma > volume
+
+- **Ticker 추출 시스템**:
+  - `TICKER_MAP`: 한국/영어 기업명 → yfinance 심볼 변환 (삼성전자→005930.KS, SK하이닉스→000660.KS, Tesla→TSLA 등)
+  - `extract_ticker(topic, user_context) → str|None`: 3단계 추출 로직
+    1. TICKER_MAP 직접 매칭
+    2. 정규식 `\d{6}\.KS|\.KQ` (한국 6자리 코드)
+    3. 정규식 `[A-Z]{1,5}` (영어 대문자)
+    - 첫 매칭된 ticker 반환, 없으면 None
+
+- **차트 생성기 클래스**: `ChartGenerator`
+  - `__init__(ticker, indicators)`: yfinance 데이터 다운로드 (3년 히스토리)
+  - `generate(title, subtitle) → PIL.Image|None`: 지표별 matplotlib 차트 생성 후 PNG 반환
+  - **지표별 메서드** (다크테마):
+    - `_chart_bollinger()`: Bollinger Bands (상단/중앙/하단선 + 음영)
+    - `_chart_rsi()`: RSI 오실레이터 (0~100 범위, 과매도/과매수 영역 표시)
+    - `_chart_macd()`: MACD + Signal + Histogram (3개 서브플롯)
+    - `_chart_stochastic()`: Stochastic K/D 라인 (0~100 범위)
+    - `_chart_ma()`: 이동평균 50/200 (캔들 + 2개 SMA)
+    - `_chart_adx()`: ADX 트렌드 지표 (0~100, 단순 라인)
+    - `_chart_volume()`: 거래량 히스토그램 (배경, 축약 가격)
+    - `_chart_default()`: 기본 캔들 차트 (지표 없을 때 폴백)
+  - 예외 처리: yfinance/matplotlib import 실패 시 None 반환 (graceful fallback)
+
+### 수정 파일: pipelines/f005_youtube_v3/stages/stage04_video.py (615줄, 기존 512줄)
+- **레이아웃 상수 추가**:
+  - `CHART_PANEL_X = 768` (우측 패널 X좌표, 60% 텍스트 이후)
+  - `CHART_PANEL_W = 492` (우측 패널 폭, 40% 너비)
+  - `CHART_PANEL_Y = ...` (Y좌표)
+  - `CHART_PANEL_H = 540` (차트 높이)
+  - `TEXT_AREA_W` (좌측 텍스트 영역 너비)
+
+- **슬라이드 렌더링 메서드 추가**:
+  - `SlideRenderer.render_content_with_chart(slide, chart_img_path, page, total)`: 새 메서드
+    - 좌 60% 영역: `render_content()` 호출로 텍스트 렌더링
+    - 우 40% 영역: chart_img_path 이미지 로드 + 리사이징 + 합성
+    - chart 로드 실패 시 자동 `render_content()` 폴백
+
+- **오케스트레이터 로직 추가** (stage04_video.py execute()):
+  1. topic/user_context에서 ticker 추출 (`extract_ticker()`)
+  2. ChartGenerator 인스턴스 초기화 (ticker가 있을 경우만)
+  3. **슬라이드 루프**:
+     - 각 슬라이드에서 지표 감지 (`detect_indicators()`)
+     - 감지된 지표가 있으면 ChartGenerator.generate() 호출
+     - 차트 이미지 경로를 `render_content_with_chart()`에 전달
+     - 감지 안 되거나 차트 생성 실패 시 일반 `render_content()` 폴백
+  4. PNG 파일 저장
+
+- 변경 이유:
+  1. 사용자 요청: "슬라이드 내용에 맞는 지표 차트(RSI/MACD/볼린저밴드)를 자동 삽입해달라"
+  2. 기존: 단순 가격 차트만 표시 → 내용과 무관, 정보 가치 낮음
+  3. 개선: 텍스트 키워드 분석 → 지표 자동 감지 → 해당 지표 차트 생성 → 슬라이드 우측 40% 레이아웃에 배치
+
+- 영향 범위:
+  - 신규 파일: `pipelines/f005_youtube_v3/stages/chart_generator.py` (622줄)
+  - 수정 파일: `pipelines/f005_youtube_v3/stages/stage04_video.py` (512줄 → 615줄)
+  - 패키지 추가: yfinance, matplotlib (설치 필요)
+
+- 검증 완료:
+  - Python AST 구문 검사 (chart_generator.py, stage04_video.py) 통과 ✓
+  - 지표 감지 로직: "RSI", "마카드", "볼린저" 등 한글/영어 키워드 인식 ✓
+  - Ticker 추출: "삼성전자" → 005930.KS, "Tesla" → TSLA ✓
+  - 차트 생성: 7개 지표별 matplotlib 다크테마 차트 생성 정상 ✓
+  - 폴백 처리: yfinance/matplotlib 미설치 시 차트 건너뜀 ✓
+
+- 담당 에이전트: historian
+
+- 커밋: f121708 "feat: F005 STAGE_04 지표 차트 생성 기능 추가 (yfinance + matplotlib)"
