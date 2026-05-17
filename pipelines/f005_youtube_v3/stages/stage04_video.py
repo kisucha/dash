@@ -470,21 +470,53 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         total = len(slides)
         clips: list[dict] = []
 
-        # 차트 생성기 초기화 — 티커 추출 실패 시 chart_gen=None으로 건너뜀
+        # ── 우측 패널 이미지 전략 결정 ────────────────────────────────
+        # 채널 카테고리에 따라 차트(금융) 또는 카테고리 이미지(기타)로 분기한다.
+        channel_category: str = input_data.get("channel_category", "")
+
         from pipelines.f005_youtube_v3.stages.chart_generator import (
             extract_ticker, detect_indicators, ChartGenerator
         )
+        from pipelines.f005_youtube_v3.stages.image_fetcher import fetch_slide_image
+
         user_context = input_data.get("user_context", "")
         ticker = extract_ticker(selected_topic, user_context)
-        if ticker:
-            logger.info(f"[F005][STAGE_04][job_id={job_id}] 감지된 티커: {ticker}")
+
+        # 금융 카테고리 키워드 집합 — 이 중 하나라도 포함되면 차트 우선
+        _FINANCE_KEYWORDS = {"경제", "재테크", "투자", "금융", "주식"}
+        is_finance_category = any(k in channel_category for k in _FINANCE_KEYWORDS)
+
+        if ticker and is_finance_category:
+            # 금융 + 티커 확인 → ChartGenerator 사용
+            logger.info(f"[F005][STAGE_04][job_id={job_id}] 금융 카테고리 + 티커={ticker} — 차트 모드")
             chart_dir = output_dir.parent / "charts"
             chart_dir.mkdir(parents=True, exist_ok=True)
             chart_gen = ChartGenerator(theme_colors=theme)
-        else:
-            logger.info(f"[F005][STAGE_04][job_id={job_id}] 티커 감지 실패 — 차트 없이 진행")
+            img_dir = None
+            use_image_fetcher = False
+        elif ticker and not is_finance_category:
+            # 티커는 있지만 금융 카테고리 아님 → 이미지 모드 우선, 차트 폴백
+            logger.info(f"[F005][STAGE_04][job_id={job_id}] 비금융 + 티커={ticker} — 이미지 모드")
             chart_gen = None
             chart_dir = None
+            img_dir = output_dir.parent / "bg_images"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            use_image_fetcher = True
+        elif not ticker and channel_category:
+            # 티커 없고 카테고리 있음 → 이미지 모드
+            logger.info(f"[F005][STAGE_04][job_id={job_id}] 카테고리={channel_category} — 이미지 모드")
+            chart_gen = None
+            chart_dir = None
+            img_dir = output_dir.parent / "bg_images"
+            img_dir.mkdir(parents=True, exist_ok=True)
+            use_image_fetcher = True
+        else:
+            # 티커 없고 카테고리 불명 → 텍스트 전용
+            logger.info(f"[F005][STAGE_04][job_id={job_id}] 카테고리 불명 — 텍스트 전용")
+            chart_gen = None
+            chart_dir = None
+            img_dir = None
+            use_image_fetcher = False
 
         for slide in slides:
             slide_no: int = slide.get("slide_no", len(clips) + 1)
@@ -492,25 +524,38 @@ class Stage04VideoGen(BaseStage, BasePipeline):
             out_path = str(output_dir / f"slide_{slide_no:02d}.png")
 
             try:
-                # 차트 생성 시도 — content/summary 타입이고 티커가 있을 때만
+                # 우측 패널 이미지 경로 — content/summary 타입에서만 시도
                 chart_path = None
-                if ticker and chart_gen and slide_type in ("content", "summary"):
-                    slide_text = (
-                        slide.get("title", "")
-                        + " "
-                        + " ".join(slide.get("bullets", []))
-                    )
-                    indicators = detect_indicators(slide_text)
-                    chart_out = str(chart_dir / f"chart_{slide_no:02d}.png")
-                    ok = chart_gen.generate(
-                        ticker=ticker,
-                        indicators=indicators,
-                        output_path=chart_out,
-                        period="3mo",
-                        chart_size=(CHART_PANEL_W, CHART_PANEL_H),
-                    )
-                    if ok:
-                        chart_path = chart_out
+                if slide_type in ("content", "summary"):
+                    if chart_gen and ticker:
+                        # 금융 차트 생성
+                        slide_text = (
+                            slide.get("title", "")
+                            + " "
+                            + " ".join(slide.get("bullets", []))
+                        )
+                        indicators = detect_indicators(slide_text)
+                        chart_out = str(chart_dir / f"chart_{slide_no:02d}.png")
+                        ok = chart_gen.generate(
+                            ticker=ticker,
+                            indicators=indicators,
+                            output_path=chart_out,
+                            period="3mo",
+                            chart_size=(CHART_PANEL_W, CHART_PANEL_H),
+                        )
+                        if ok:
+                            chart_path = chart_out
+                    elif use_image_fetcher:
+                        # 카테고리 배경 이미지 다운로드 또는 Pillow 생성
+                        img_out = str(img_dir / f"bg_{slide_no:02d}.png")
+                        ok = fetch_slide_image(
+                            channel_category=channel_category,
+                            slide_index=slide_no - 1,
+                            output_path=img_out,
+                            size=(CHART_PANEL_W, CHART_PANEL_H),
+                        )
+                        if ok:
+                            chart_path = img_out
 
                 if slide_type == "title":
                     img = renderer.render_title(slide, page=slide_no, total=total)
