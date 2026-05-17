@@ -5,6 +5,7 @@ import {
   Audio,
   Img,
   interpolate,
+  staticFile,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
@@ -123,13 +124,10 @@ const SlideRenderer: React.FC<SlideRendererProps> = ({
         })
       : 0;
 
-  // Windows 절대 경로를 URL로 변환 (backslash -> slash)
-  const normalizedPath = filePath.replace(/\\/g, "/");
-
   return (
     <AbsoluteFill style={{ background: "#000" }}>
       <Img
-        src={normalizedPath}
+        src={staticFile(filePath)}
         style={{
           width: "100%",
           height: "100%",
@@ -237,12 +235,10 @@ export const F006Video: React.FC<F006VideoProps> = ({
     if (i < slides.length - 1) accFrames -= TRANSITION_FRAMES; // 전환 오버랩
   }
 
-  const normalizedAudioPath = audio_path.replace(/\\/g, "/");
-
   return (
     <AbsoluteFill style={{ background: "#000" }}>
-      {/* 오디오 트랙 */}
-      {audio_path && <Audio src={normalizedAudioPath} />}
+      {/* 오디오 트랙 — staticFile()로 --public-dir 기준 상대 경로 접근 */}
+      {audio_path && <Audio src={staticFile(audio_path)} />}
 
       {/* 슬라이드 전환 시리즈 */}
       <TransitionSeries>

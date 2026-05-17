@@ -212,26 +212,38 @@ class Stage05rRemotion(BaseStage, BasePipeline):
         # ----------------------------------------------------------------
         # 5. remotion_props.json 구성 및 저장
         # ----------------------------------------------------------------
-        # 슬라이드 데이터 구성 (type 필드 정규화 포함)
+        # job 디렉토리 — --public-dir 기준 (Remotion 내부 서버 루트)
+        job_dir: Path = _PROJECT_ROOT / "storage" / "results" / "f006" / str(job_id)
+
+        # 슬라이드 데이터 구성 (type 필드 정규화 + job_dir 기준 상대 경로)
         slides_data: list[dict] = []
         for clip in valid_clips:
             raw_type: str = clip.get("type", "content")
             # 허용 타입 목록 - 벗어나면 "content"로 폴백
             allowed_types = {"title", "content", "summary", "quote"}
             slide_type: str = raw_type if raw_type in allowed_types else "content"
-            file_path_normalized: str = clip["file_path"].replace("\\", "/")
+            # Remotion staticFile()은 --public-dir 기준 상대 경로를 사용
+            try:
+                rel = Path(clip["file_path"]).relative_to(job_dir)
+                file_path_for_props: str = str(rel).replace("\\", "/")
+            except ValueError:
+                file_path_for_props = Path(clip["file_path"]).name
             duration_sec: float = clip_durations.get(clip["file_path"], 5.0)
             slides_data.append({
                 "slide_no": clip.get("slide_no", len(slides_data) + 1),
                 "type": slide_type,
-                "file_path": file_path_normalized,
+                "file_path": file_path_for_props,
                 "duration_sec": round(duration_sec, 3),
             })
 
-        # 오디오 경로 정규화
+        # 오디오 경로 — job_dir 기준 상대 경로 (staticFile 대응)
         audio_path_normalized: str = ""
         if audio_file_path:
-            audio_path_normalized = audio_file_path.replace("\\", "/")
+            try:
+                audio_rel = Path(audio_file_path).relative_to(job_dir)
+                audio_path_normalized = str(audio_rel).replace("\\", "/")
+            except ValueError:
+                audio_path_normalized = Path(audio_file_path).name
 
         remotion_props: dict = {
             "slides": slides_data,
@@ -301,10 +313,13 @@ class Stage05rRemotion(BaseStage, BasePipeline):
         output_final_dir.mkdir(parents=True, exist_ok=True)
         output_video_path: str = str(output_final_dir / "output_remotion.mp4")
 
+        # --public-dir: Remotion 내부 서버가 job 폴더를 루트로 서빙 → staticFile() 로컬 접근 가능
+        public_dir_str: str = str(job_dir).replace("\\", "/")
         cmd_render: list[str] = [
             "cmd", "/c", "npx", "remotion", "render",
             "--props", str(props_json_path),
             f"--concurrency={concurrency}",
+            f"--public-dir={public_dir_str}",
             "src/Root.tsx",
             "F006Video",
             output_video_path,
@@ -355,6 +370,7 @@ class Stage05rRemotion(BaseStage, BasePipeline):
             "cmd", "/c", "npx", "remotion", "still",
             "--props", str(props_json_path),
             "--frame=0",
+            f"--public-dir={public_dir_str}",
             "src/Root.tsx",
             "F006Video",
             thumbnail_path,
