@@ -1,5 +1,5 @@
 // 목적: Remotion Composition 등록 - F006Video 컴포지션을 등록하고 메타데이터를 동적 계산한다.
-import { Composition } from "remotion";
+import { Composition, registerRoot } from "remotion";
 import { F006Video, F006VideoProps } from "./F006Video";
 
 // 기본 props - remotion studio에서 미리보기용
@@ -35,3 +35,6 @@ export const RemotionRoot: React.FC = () => {
     />
   );
 };
+
+// Remotion CLI 진입점 — registerRoot() 필수
+registerRoot(RemotionRoot);
