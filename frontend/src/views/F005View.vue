@@ -96,12 +96,16 @@ function formatDate(dateStr) {
   })
 }
 
-// ── 채팅 컨텍스트 가져오기 — 라우터 쿼리 파라미터 처리 ──
+// ── 채팅 컨텍스트 가져오기 — sessionStorage 우선, 없으면 URL 쿼리 파라미터 폴백 ──
 function loadChatContext() {
-  const chatContext = route.query.chatContext
+  const fromSession = sessionStorage.getItem('f005_chat_context')
+  const fromQuery = route.query.chatContext
+  const chatContext = fromSession || fromQuery || ''
   if (chatContext) {
     userContext.value = chatContext
     chatContextHint.value = '채팅 컨텍스트가 자동으로 입력되었습니다.'
+    // 1회 사용 후 세션 스토리지 삭제 (다음 번 모달 오픈 시 재입력 방지)
+    sessionStorage.removeItem('f005_chat_context')
   } else {
     chatContextHint.value = 'AI 채팅 패널에서 컨텍스트를 먼저 복사하세요.'
   }
@@ -201,9 +205,13 @@ async function deleteJob(job) {
   }
 }
 
-// ── 마운트: 작업 목록 로드 ──
+// ── 마운트: 작업 목록 로드 + ChatPanel에서 넘어온 경우 모달 자동 열기 ──
 onMounted(async () => {
   await f005Store.fetchJobs(20)
+  // sessionStorage에 chatContext가 있으면 ChatPanel에서 넘어온 것 → 모달 자동 오픈
+  if (sessionStorage.getItem('f005_chat_context')) {
+    openModal()
+  }
 })
 </script>
 

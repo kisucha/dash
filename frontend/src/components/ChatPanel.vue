@@ -263,10 +263,11 @@ const lastAssistantMsgId = computed(() => {
   return assistants[assistants.length - 1].id
 })
 
-// F005 컨텐츠 만들기 — 마지막 assistant 메시지 내용을 chatContext로 F005 페이지로 이동
+// F005 컨텐츠 만들기 — 마지막 assistant 메시지 내용을 sessionStorage에 저장 후 F005 페이지로 이동
+// URL 쿼리 파라미터 길이 제한(~2000자) 우회를 위해 sessionStorage 사용
 function goToF005(msgContent) {
-  const chatContext = (msgContent ?? '').slice(0, 2000)
-  router.push({ name: 'F005', query: { chatContext } })
+  sessionStorage.setItem('f005_chat_context', msgContent ?? '')
+  router.push({ name: 'F005Feature' })
 }
 
 // 부모(App.vue)가 라우트 이동 등의 상황에서 포커스를 복원할 수 있도록 노출
