@@ -482,6 +482,17 @@ onMounted(async () => {
         <div v-show="modalStep === 3" class="modal-body">
           <h3 class="step-subtitle">미디어 설정</h3>
 
+          <!-- 자막 설정 — 상단 배치 (렌더링 방식 무관하게 항상 보이도록) -->
+          <div class="subtitle-toggle-bar">
+            <label class="subtitle-toggle-label">
+              <input type="checkbox" v-model="subtitleEnabled" class="subtitle-checkbox" />
+              <span class="subtitle-toggle-text">자막 포함</span>
+            </label>
+            <span class="subtitle-toggle-hint">
+              {{ subtitleEnabled ? '자막이 영상에 번인됩니다' : '자막 없이 영상만 생성합니다' }}
+            </span>
+          </div>
+
           <div class="form-grid">
             <div class="form-item">
               <label class="form-label">TTS 프로바이더</label>
@@ -552,20 +563,6 @@ onMounted(async () => {
                 <option value="script_only">스크립트만 (영상 없음)</option>
               </select>
             </div>
-          </div>
-
-          <!-- 자막 설정 -->
-          <div class="section-divider">
-            <span class="section-divider-label">자막 설정</span>
-          </div>
-
-          <div class="form-item">
-            <label class="form-label">자막</label>
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="subtitleEnabled" />
-              <span>자막 생성 및 포함</span>
-            </label>
-            <p class="field-hint">체크 해제 시 자막 없이 영상만 생성합니다.</p>
           </div>
 
           <!-- 렌더링 모드 선택 -->
@@ -1334,6 +1331,44 @@ onMounted(async () => {
 }
 .btn-modal-create:hover:not(:disabled) { background: #047857; }
 .btn-modal-create:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 자막 토글 바 — Step 3 최상단 눈에 잘 보이는 위치 */
+.subtitle-toggle-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #1a2744;
+  border: 1px solid #2a3f70;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+}
+
+.subtitle-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.subtitle-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #4e9af1;
+  cursor: pointer;
+}
+
+.subtitle-toggle-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e8ff;
+}
+
+.subtitle-toggle-hint {
+  font-size: 12px;
+  color: #7a9bd4;
+}
 
 /* Remotion 설정 구분선 */
 .section-divider {

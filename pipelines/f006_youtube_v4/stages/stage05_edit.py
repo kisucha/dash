@@ -9,6 +9,7 @@ import logging
 import subprocess
 import tempfile
 import os
+import shutil
 
 # imageio-ffmpeg 번들 FFmpeg 경로 - 시스템 PATH에 ffmpeg 없어도 동작
 import imageio_ffmpeg as _imageio_ffmpeg
@@ -116,15 +117,37 @@ class Stage05Edit(BaseStage, BasePipeline):
             logger.error(f"[F006][STAGE_05][job_id={job_id}] FFmpeg 실패: {e}")
             raise RuntimeError(f"STAGE_05 FFmpeg 편집 실패: {e}") from e
 
-        # Whisper 자막 생성 (subtitle_enabled=True이고 오디오 있는 경우에만)
+        # 자막 생성 - subtitle_enabled=False이면 건너뜀
         subtitle_enabled: bool = bool(input_data.get("subtitle_enabled", True))
+        # stage03에서 SubMaker가 생성한 SRT 경로 (WordBoundary 기반, 정확한 타임코드)
+        srt_from_stage03: Optional[str] = input_data.get("srt_file_path")
         has_subtitles: bool = False
-        if subtitle_enabled and audio_file_path and Path(audio_file_path).exists():
-            has_subtitles = self._run_whisper_transcribe(
-                audio_file_path, output_srt, job_id
+
+        if subtitle_enabled:
+            if srt_from_stage03 and Path(srt_from_stage03).exists():
+                # SubMaker SRT 직접 복사 — Whisper 건너뜀 (이미 정확한 타임코드)
+                shutil.copy2(srt_from_stage03, output_srt)
+                has_subtitles = True
+                logger.info(
+                    f"[F006][STAGE_05][job_id={job_id}] SubMaker SRT 복사 사용: "
+                    f"{srt_from_stage03}"
+                )
+            elif audio_file_path and Path(audio_file_path).exists():
+                # Whisper 폴백 (SubMaker SRT 없는 경우 — edge_tts 외 프로바이더)
+                has_subtitles = self._run_whisper_transcribe(
+                    audio_file_path, output_srt, job_id
+                )
+        else:
+            logger.info(f"[F006][STAGE_05][job_id={job_id}] 자막 비활성화 - 건너뜀")
+
+        # 자막 번인 — SRT 파일이 준비된 경우 FFmpeg subtitles 필터로 영상에 번인
+        if has_subtitles and Path(output_srt).exists():
+            output_video_burned: str = str(output_dir / "output_burned.mp4")
+            burned_ok: bool = self._burn_subtitles(
+                output_video, output_srt, output_video_burned, job_id
             )
-        elif not subtitle_enabled:
-            logger.info(f"[F006][STAGE_05][job_id={job_id}] 자막 비활성화 - Whisper 건너뜀")
+            if burned_ok and Path(output_video_burned).exists():
+                output_video = output_video_burned
 
         # 결과 메타데이터 수집
         output_file = Path(output_video)
@@ -434,6 +457,76 @@ class Stage05Edit(BaseStage, BasePipeline):
                 f"검정 영상 생성 실패: {result.stderr[:200]}"
             )
         logger.info(f"[F006][STAGE_05][job_id={job_id}] 검정 배경 영상 생성 완료")
+
+    # ------------------------------------------------------------------
+    # 자막 번인 헬퍼
+    # ------------------------------------------------------------------
+
+    def _burn_subtitles(
+        self,
+        video_path: str,
+        srt_path: str,
+        output_path: str,
+        job_id: int,
+    ) -> bool:
+        """FFmpeg subtitles 필터로 자막을 영상에 번인. 실패 시 False 반환.
+
+        Windows 경로 이슈: 백슬래시를 슬래시로, 드라이브 콜론을 이스케이프.
+        번인 실패는 치명적이지 않음 — 경고 후 원본 영상 유지.
+        """
+        _ffmpeg_exe: str = _imageio_ffmpeg.get_ffmpeg_exe()
+
+        # Windows 경로 → FFmpeg subtitles 필터 형식 변환
+        # E:\path\file.srt → E\:/path/file.srt
+        srt_for_filter: str = (
+            srt_path.replace("\\", "/").replace(":/", "\\:/")
+        )
+
+        # 자막 스타일: 흰색, 28pt, 외곽선+배경 - 한국어 가독성 최적화
+        vf_filter: str = (
+            f"subtitles='{srt_for_filter}':"
+            "force_style='FontSize=28,PrimaryColour=&HFFFFFF,"
+            "BorderStyle=3,Outline=2,Shadow=1,MarginV=40'"
+        )
+
+        cmd: list[str] = [
+            _ffmpeg_exe, "-y",
+            "-i", video_path,
+            "-vf", vf_filter,
+            "-c:a", "copy",
+            output_path,
+        ]
+
+        logger.info(f"[F006][STAGE_05][job_id={job_id}] 자막 번인 시작: {srt_path}")
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=600,
+            )
+            if result.returncode != 0:
+                logger.warning(
+                    f"[F006][STAGE_05][job_id={job_id}] 자막 번인 실패 (원본 영상 유지): "
+                    f"{result.stderr[:300]}"
+                )
+                return False
+            logger.info(
+                f"[F006][STAGE_05][job_id={job_id}] 자막 번인 완료: {output_path}"
+            )
+            return True
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"[F006][STAGE_05][job_id={job_id}] 자막 번인 타임아웃 (600초) - 원본 영상 유지"
+            )
+            return False
+        except Exception as e:
+            logger.warning(
+                f"[F006][STAGE_05][job_id={job_id}] 자막 번인 오류 (원본 영상 유지): {e}"
+            )
+            return False
 
     # ------------------------------------------------------------------
     # Whisper 자막 헬퍼
