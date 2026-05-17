@@ -320,16 +320,49 @@ class F006Orchestrator(BasePipeline):
         logger.info(f"[job_id={job_id}] {stage_id} RUNNING 전환 완료")
 
         # 스테이지 클래스 인스턴스화
-        # STAGE_05_EDIT: use_remotion 플래그에 따라 Stage05rRemotion 선택
-        if stage_id == "STAGE_05_EDIT":
-            use_remotion: bool = input_data.get("use_remotion", False)
-            if use_remotion:
+        # STAGE_04_VIDEO_GEN: render_mode가 video_bg / remotion_native이면 Stage04bVideoJson 선택
+        # STAGE_05_EDIT: render_mode에 따라 Stage05Edit / Stage05rRemotion / Stage05rRemotionB / Stage05rRemotionA 선택
+        if stage_id == "STAGE_04_VIDEO_GEN":
+            render_mode_04: str = input_data.get("render_mode", "ffmpeg")
+            if render_mode_04 in ("video_bg", "remotion_native"):
+                from pipelines.f006_youtube_v4.stages.stage04b_video_json import Stage04bVideoJson
+                stage_class = Stage04bVideoJson
+                logger.info(
+                    f"[job_id={job_id}] STAGE_04_VIDEO_GEN: "
+                    f"render_mode={render_mode_04} -> Stage04bVideoJson (JSON 출력)"
+                )
+            else:
+                stage_class = Stage04VideoGen
+                logger.info(
+                    f"[job_id={job_id}] STAGE_04_VIDEO_GEN: "
+                    f"render_mode={render_mode_04} -> Stage04VideoGen (PNG 슬라이드)"
+                )
+        elif stage_id == "STAGE_05_EDIT":
+            render_mode_05: str = input_data.get("render_mode", "ffmpeg")
+            # [DEPRECATED] 하위 호환: use_remotion=True이면 kenburns로 처리
+            if render_mode_05 == "ffmpeg" and input_data.get("use_remotion", False):
+                render_mode_05 = "kenburns"
+                logger.info(
+                    f"[job_id={job_id}] STAGE_05_EDIT: "
+                    f"use_remotion=True(deprecated) -> render_mode='kenburns' 적용"
+                )
+            if render_mode_05 == "kenburns":
                 from pipelines.f006_youtube_v4.stages.stage05r_remotion import Stage05rRemotion
                 stage_class = Stage05rRemotion
-                logger.info(f"[job_id={job_id}] STAGE_05_EDIT: Remotion 렌더링 경로 선택")
+                logger.info(f"[job_id={job_id}] STAGE_05_EDIT: kenburns -> Stage05rRemotion")
+            elif render_mode_05 == "video_bg":
+                from pipelines.f006_youtube_v4.stages.stage05r_remotion_b import Stage05rRemotionB
+                stage_class = Stage05rRemotionB
+                logger.info(f"[job_id={job_id}] STAGE_05_EDIT: video_bg -> Stage05rRemotionB")
+            elif render_mode_05 == "remotion_native":
+                from pipelines.f006_youtube_v4.stages.stage05r_remotion_a import Stage05rRemotionA
+                stage_class = Stage05rRemotionA
+                logger.info(
+                    f"[job_id={job_id}] STAGE_05_EDIT: remotion_native -> Stage05rRemotionA"
+                )
             else:
                 stage_class = Stage05Edit
-                logger.info(f"[job_id={job_id}] STAGE_05_EDIT: FFmpeg 기본 경로 선택")
+                logger.info(f"[job_id={job_id}] STAGE_05_EDIT: ffmpeg -> Stage05Edit")
         else:
             stage_class = _STAGE_CLASS_MAP.get(stage_id)
             if stage_class is None:
@@ -504,12 +537,18 @@ class F006Orchestrator(BasePipeline):
                 "slide_font_path": self._load_config().get("slide_font_path", ""),
                 # skip_mode는 호환성 유지
                 "skip_mode": initial_params.get("skip_mode"),
+                # render_mode 전달 - Stage04bVideoJson 라우팅에 사용
+                "render_mode": initial_params.get("render_mode", "ffmpeg"),
             }
 
         if stage_id == "STAGE_05_EDIT":
             result = self._handle_skip_chain(db_conn, job_id)
-            # Remotion 파라미터 추가 (use_remotion=True 시 Stage05rRemotion에 전달)
+            # render_mode 및 Remotion 파라미터 추가
             result.update({
+                "render_mode": initial_params.get("render_mode", "ffmpeg"),
+                "channel_name": initial_params.get("channel_name", ""),
+                "channel_category": initial_params.get("channel_category", ""),
+                # [DEPRECATED] use_remotion 하위 호환 유지
                 "use_remotion": initial_params.get("use_remotion", False),
                 "remotion_theme": initial_params.get("remotion_theme", "dark_blue"),
                 "remotion_transition": initial_params.get("remotion_transition", "auto"),
@@ -579,6 +618,8 @@ class F006Orchestrator(BasePipeline):
             "clips": clips,
             "audio_file_path": audio_file_path,
             "srt_file_path": srt_file_path,
+            # video_bg / remotion_native 모드에서 Stage04bVideoJson이 생성한 텍스트 JSON 전달
+            "slide_json_data": stage04_output.get("slide_json_data", []),
         }
 
     # ------------------------------------------------------------------

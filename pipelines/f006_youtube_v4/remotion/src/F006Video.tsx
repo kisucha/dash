@@ -95,28 +95,41 @@ const SlideRenderer: React.FC<SlideRendererProps> = ({
   // getTheme은 현재 사용되지 않지만 테마 확장을 위해 import 유지
   void getTheme;
 
-  // 등장 애니메이션 - 타입별 다른 효과
-  const opacity = interpolate(frame, [0, 10], [0, 1], {
+  // 등장 애니메이션 — 처음 8프레임만 opacity 0→1
+  const opacity = interpolate(frame, [0, 8], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
+  // Ken Burns 연속 애니메이션 — 슬라이드 전체 구간(durationInFrames) 동안 천천히 움직임
+  // title: 천천히 줌인 (1.0 → 1.08)
+  // quote: 천천히 줌아웃 (1.08 → 1.0)
+  // content / summary: 고정 scale 1.03
   const scale =
     slideType === "title"
-      ? interpolate(frame, [0, 20], [1.06, 1.0], {
+      ? interpolate(frame, [0, durationInFrames], [1.0, 1.08], {
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         })
       : slideType === "quote"
-      ? interpolate(frame, [0, 18], [0.96, 1.0], {
+      ? interpolate(frame, [0, durationInFrames], [1.08, 1.0], {
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         })
-      : 1;
+      : 1.03;
 
+  // 패닝 애니메이션 — 슬라이드 전체 구간 연속 이동
+  // content: 오른쪽→왼쪽 (20px → -20px)
+  // summary: 왼쪽→오른쪽 (-15px → 15px)
+  // title / quote: 패닝 없음
   const translateX =
-    slideType === "content" || slideType === "summary"
-      ? interpolate(frame, [0, 15], [24, 0], {
+    slideType === "content"
+      ? interpolate(frame, [0, durationInFrames], [20, -20], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        })
+      : slideType === "summary"
+      ? interpolate(frame, [0, durationInFrames], [-15, 15], {
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         })

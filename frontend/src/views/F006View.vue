@@ -80,10 +80,12 @@ watch(ttsProvider, () => {
 const generationBackend = ref('comfyui')  // 영상 생성 백엔드
 const skipMode = ref('')             // 스킵 모드 (stock 등)
 
-// ── 모달 Step 3: Remotion 설정 (선택적 병렬 렌더링) ──
-const useRemotion = ref(false)          // Remotion 렌더링 활성화 여부
-const remotionTheme = ref('dark_blue')  // Remotion 테마 선택
-const remotionTransition = ref('auto')  // Remotion 전환 모드
+// ── 모달 Step 3: 렌더링 모드 설정 ──
+// renderMode: ffmpeg / kenburns / video_bg / remotion_native
+const renderMode = ref('ffmpeg')
+// Remotion 사용 모드에서만 활성화되는 추가 설정
+const remotionTheme = ref('dark_blue')      // kenburns/video_bg/remotion_native 전용
+const remotionTransition = ref('auto')      // kenburns 전용
 
 // ── 모달 Step 4: 업로드 설정 ──
 const uploadMode = ref('manual_approval')    // 업로드 모드 (manual_approval / auto)
@@ -186,8 +188,10 @@ async function submitCreateJob() {
     ...(skipMode.value ? { skip_mode: skipMode.value } : {}),
     upload_mode: uploadMode.value,
     privacy: privacy.value,
-    use_remotion: useRemotion.value,
-    ...(useRemotion.value ? {
+    render_mode: renderMode.value,
+    // Remotion 모드 하위 호환 — 백엔드 기존 use_remotion 필드 지원
+    use_remotion: renderMode.value !== 'ffmpeg',
+    ...(renderMode.value !== 'ffmpeg' ? {
       remotion_theme: remotionTheme.value,
       remotion_transition: remotionTransition.value,
     } : {}),
@@ -545,39 +549,80 @@ onMounted(async () => {
             </div>
           </div>
 
-          <!-- Remotion 설정 구분선 -->
-          <div class="section-divider">
-            <span class="section-divider-label">Remotion 렌더링 (선택)</span>
-          </div>
-
-          <!-- Remotion 활성화 체크박스 -->
-          <div class="form-item">
-            <label class="form-label">Remotion 렌더링</label>
-            <label class="checkbox-label">
-              <input type="checkbox" v-model="useRemotion" />
-              <span>Remotion으로 자연스러운 영상 생성</span>
-            </label>
-            <p class="field-hint">FFmpeg 기본 방식 대신 Remotion을 사용해 슬라이드 전환 애니메이션이 적용된 영상을 생성합니다. 렌더링 시간이 더 소요됩니다.</p>
-          </div>
-
-          <div class="form-grid" v-if="useRemotion">
-            <div class="form-item">
-              <label class="form-label">Remotion 테마</label>
-              <select v-model="remotionTheme" class="form-select">
-                <option value="dark_blue">다크 블루 (기본)</option>
-                <option value="warm_gray">웜 그레이 (고급)</option>
-                <option value="clean_white">클린 화이트 (밝은)</option>
-              </select>
-              <p class="field-hint">영상 배경 테마 색상을 선택합니다.</p>
+          <!-- 렌더링 모드 선택 -->
+          <div class="render-mode-section">
+            <div class="section-divider">
+              <span class="section-divider-label">렌더링 방식 선택</span>
             </div>
-            <div class="form-item">
-              <label class="form-label">슬라이드 전환 효과</label>
-              <select v-model="remotionTransition" class="form-select">
-                <option value="auto">자동 (슬라이드 타입별 최적화)</option>
-                <option value="fade_only">페이드 통일</option>
-                <option value="slide_only">슬라이드 통일</option>
-              </select>
-              <p class="field-hint">슬라이드 간 전환 애니메이션 방식을 선택합니다.</p>
+
+            <div class="render-mode-grid">
+              <!-- FFmpeg (기본) -->
+              <div
+                class="render-mode-card"
+                :class="{ selected: renderMode === 'ffmpeg' }"
+                @click="renderMode = 'ffmpeg'"
+              >
+                <div class="render-mode-icon">🎬</div>
+                <div class="render-mode-title">기본 (FFmpeg)</div>
+                <div class="render-mode-desc">슬라이드 이어붙이기. 빠르고 안정적.</div>
+                <div class="render-mode-badge default">기본값</div>
+              </div>
+
+              <!-- Ken Burns -->
+              <div
+                class="render-mode-card"
+                :class="{ selected: renderMode === 'kenburns' }"
+                @click="renderMode = 'kenburns'"
+              >
+                <div class="render-mode-icon">🎥</div>
+                <div class="render-mode-title">Ken Burns</div>
+                <div class="render-mode-desc">슬라이드에 천천히 패닝/줌 효과. Remotion 사용.</div>
+                <div class="render-mode-badge remotion">Remotion</div>
+              </div>
+
+              <!-- 영상 배경 -->
+              <div
+                class="render-mode-card"
+                :class="{ selected: renderMode === 'video_bg' }"
+                @click="renderMode = 'video_bg'"
+              >
+                <div class="render-mode-icon">✨</div>
+                <div class="render-mode-title">영상 배경</div>
+                <div class="render-mode-desc">애니메이션 그라디언트 배경 + 텍스트. 영상다운 느낌.</div>
+                <div class="render-mode-badge premium">추천</div>
+              </div>
+
+              <!-- 네이티브 렌더링 -->
+              <div
+                class="render-mode-card"
+                :class="{ selected: renderMode === 'remotion_native' }"
+                @click="renderMode = 'remotion_native'"
+              >
+                <div class="render-mode-icon">🚀</div>
+                <div class="render-mode-title">네이티브 렌더링</div>
+                <div class="render-mode-desc">차트 애니메이션 + 숫자 카운터. 최고 품질.</div>
+                <div class="render-mode-badge premium">최고 품질</div>
+              </div>
+            </div>
+
+            <!-- Remotion 추가 설정 (kenburns/video_bg/remotion_native 선택 시) -->
+            <div v-if="renderMode !== 'ffmpeg'" class="form-grid remotion-extra">
+              <div class="form-item">
+                <label class="form-label">테마 색상</label>
+                <select v-model="remotionTheme" class="form-select">
+                  <option value="dark_blue">다크 블루 (기본)</option>
+                  <option value="warm_gray">웜 그레이 (고급)</option>
+                  <option value="clean_white">클린 화이트 (밝은)</option>
+                </select>
+              </div>
+              <div class="form-item" v-if="renderMode === 'kenburns'">
+                <label class="form-label">전환 효과</label>
+                <select v-model="remotionTransition" class="form-select">
+                  <option value="auto">자동 (타입별 최적화)</option>
+                  <option value="fade_only">페이드 통일</option>
+                  <option value="slide_only">슬라이드 통일</option>
+                </select>
+              </div>
             </div>
           </div>
         </div>
@@ -653,9 +698,13 @@ onMounted(async () => {
               <span>영상 생성</span>
               <strong>{{ generationBackend }}</strong>
             </div>
-            <div class="summary-row" v-if="useRemotion">
-              <span>Remotion 렌더링</span>
-              <strong>활성화 ({{ remotionTheme }} / {{ remotionTransition }})</strong>
+            <div class="summary-row">
+              <span>렌더링 방식</span>
+              <strong>{{ {ffmpeg: '기본 (FFmpeg)', kenburns: 'Ken Burns', video_bg: '영상 배경', remotion_native: '네이티브 렌더링'}[renderMode] }}</strong>
+            </div>
+            <div class="summary-row" v-if="renderMode !== 'ffmpeg'">
+              <span>테마</span>
+              <strong>{{ remotionTheme }}</strong>
             </div>
             <div class="summary-row">
               <span>업로드 모드 / 공개</span>
@@ -1273,5 +1322,91 @@ onMounted(async () => {
   color: #aaa;
   white-space: nowrap;
   padding: 0 4px;
+}
+
+/* ── 렌더링 모드 선택 ── */
+.render-mode-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.render-mode-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+.render-mode-card {
+  border: 2px solid #e8e8e8;
+  border-radius: 10px;
+  padding: 14px 14px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  position: relative;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.render-mode-card:hover {
+  border-color: #059669;
+  background: #f0fdf4;
+}
+
+.render-mode-card.selected {
+  border-color: #059669;
+  background: #f0fdf4;
+  box-shadow: 0 0 0 2px #a7f3d0;
+}
+
+.render-mode-icon {
+  font-size: 22px;
+  margin-bottom: 2px;
+}
+
+.render-mode-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #222;
+}
+
+.render-mode-desc {
+  font-size: 11px;
+  color: #777;
+  line-height: 1.4;
+}
+
+.render-mode-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 8px;
+  display: inline-block;
+  margin-top: 4px;
+}
+
+.render-mode-badge.default {
+  background: #f0f0f0;
+  color: #888;
+}
+
+.render-mode-badge.remotion {
+  background: #ede9fe;
+  color: #7c3aed;
+}
+
+.render-mode-badge.premium {
+  background: #fef9c3;
+  color: #a16207;
+}
+
+.remotion-extra {
+  margin-top: 4px;
+  padding: 12px;
+  background: #f8fffe;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
 }
 </style>

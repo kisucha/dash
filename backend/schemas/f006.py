@@ -58,8 +58,14 @@ class F006JobCreateRequest(BaseModel):
     upload_mode: str = Field(default="manual_approval", description="auto/manual_approval")
     # YouTube 공개 설정
     privacy: str = Field(default="private", description="public/unlisted/private")
-    # Remotion 렌더링 사용 여부 (False=FFmpeg 기본, True=Remotion 선택적 병렬)
-    use_remotion: bool = Field(default=False, description="Remotion 렌더링 활성화 (True=Remotion, False=FFmpeg 기본)")
+    # 렌더링 모드 선택 (ffmpeg/kenburns/video_bg/remotion_native)
+    # ffmpeg: 기존 FFmpeg concat (기본값)
+    # kenburns: Remotion + Ken Burns 애니메이션 (PNG 슬라이드 유지)
+    # video_bg: Remotion + 애니메이션 그라디언트 배경 + 텍스트 JSON 렌더링 (PNG 없음)
+    # remotion_native: Remotion 전체 네이티브 렌더링 (PNG 없음, 차트 애니메이션 포함)
+    render_mode: str = Field(default="ffmpeg", description="렌더링 모드 (ffmpeg/kenburns/video_bg/remotion_native)")
+    # [DEPRECATED] Remotion 렌더링 사용 여부 — render_mode 도입으로 deprecated. 하위 호환성 유지
+    use_remotion: bool = Field(default=False, description="[DEPRECATED] Remotion 렌더링 활성화 — render_mode='kenburns' 사용 권장")
     # Remotion 테마 선택 (dark_blue/warm_gray/clean_white)
     remotion_theme: str = Field(default="dark_blue", description="Remotion 테마 (dark_blue/warm_gray/clean_white)")
     # Remotion 슬라이드 전환 모드 (auto/fade_only/slide_only)

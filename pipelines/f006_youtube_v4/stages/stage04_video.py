@@ -219,26 +219,45 @@ class SlideRenderer:
         """self._extra를 추가해 _load_font를 호출하는 헬퍼."""
         return _load_font(size, bold=bold, extra_candidates=self._extra)
 
+    # -- 테마별 그라디언트 2색 정의 (상단색 -> 하단색) --
+    # SLIDE_THEMES 키와 동일 이름으로 맵핑; 없으면 bg 단색 폴백
+    _GRADIENT_MAP: dict = {
+        "dark_blue":  ((10, 22, 40),   (15, 36, 84)),   # #0a1628 -> #0f2454
+        "dark_green": ((10, 30, 20),   (15, 55, 35)),
+        "corporate":  ((240, 244, 248), (232, 244, 253)), # #f0f4f8 -> #e8f4fd
+    }
+
     def _make_base_image(self, gradient: bool = False):
-        """배경 이미지와 Draw 객체를 생성해 반환한다."""
+        """배경 이미지와 Draw 객체를 생성해 반환한다.
+
+        gradient=True 시 2색 수직 그라디언트 배경을 그린다.
+        numpy 없이 ImageDraw rect 반복으로 구현 (호환성 우선).
+        """
         from PIL import Image, ImageDraw
 
         img = Image.new("RGB", (W, H), self.theme["bg"])
 
         if gradient:
-            try:
-                import numpy as np
-
-                bg = np.array(self.theme["bg"], dtype=float)
-                ac = np.array(self.theme["accent"], dtype=float)
-                arr = np.zeros((H, W, 3), dtype=np.uint8)
-                for y in range(H):
-                    for x in range(W):
-                        t = (x / W + y / H) / 2 * 0.18
-                        arr[y, x] = (bg * (1 - t) + ac * t).clip(0, 255).astype(np.uint8)
-                img = Image.fromarray(arr, "RGB")
-            except ImportError:
-                pass  # numpy 없으면 단색 유지
+            # 테마 이름 탐색 - SLIDE_THEMES 역방향 검색
+            theme_name = next(
+                (k for k, v in SLIDE_THEMES.items() if v is self.theme),
+                None,
+            )
+            grad_colors = self._GRADIENT_MAP.get(theme_name)
+            if grad_colors:
+                top_c, bot_c = grad_colors
+                draw_tmp = ImageDraw.Draw(img)
+                # 수직 그라디언트: 한 줄씩 색상 보간 (strip 단위로 블록 채워 성능 최적화)
+                strip = max(1, H // 180)  # 약 180 스텝으로 분할
+                for y_start in range(0, H, strip):
+                    t = y_start / H
+                    r = int(top_c[0] + (bot_c[0] - top_c[0]) * t)
+                    g = int(top_c[1] + (bot_c[1] - top_c[1]) * t)
+                    b = int(top_c[2] + (bot_c[2] - top_c[2]) * t)
+                    draw_tmp.rectangle(
+                        [0, y_start, W, min(y_start + strip - 1, H - 1)],
+                        fill=(r, g, b),
+                    )
 
         draw = ImageDraw.Draw(img)
         return img, draw
@@ -290,6 +309,34 @@ class SlideRenderer:
                 anchor="lm",
             )
 
+    def _draw_branding_bar(self, img, draw) -> None:
+        """하단 브랜딩 바 - 하단 60px에 반투명 오버레이 + 채널명 텍스트.
+
+        채널명이 없으면 아무것도 그리지 않는다.
+        Image 객체가 필요한 이유: ImageDraw는 RGBA alpha 합성 불가 -> 별도 레이어 paste.
+        """
+        if not self.channel_name:
+            return
+        from PIL import Image, ImageDraw as _ID
+
+        bar_h = 60
+        bar_y = H - bar_h
+
+        # 반투명 레이어 생성 (알파 128 = 50% 불투명)
+        overlay = Image.new("RGBA", (W, bar_h), (0, 0, 0, 128))
+        # 원본 이미지를 RGBA로 변환하지 않고 paste로 합성 (mask 사용)
+        img.paste(overlay, (0, bar_y), overlay)
+
+        # 합성 후 draw 객체로 채널명 텍스트 출력
+        bfont = self._font(24, bold=True)
+        draw.text(
+            (MARGIN_X, bar_y + bar_h // 2),
+            self.channel_name[:50],
+            font=bfont,
+            fill=(255, 255, 255),
+            anchor="lm",
+        )
+
     def _wrap_text(self, draw, text: str, font, max_width: int) -> list:
         """한글/영문 혼용 텍스트를 max_width 픽셀 기준으로 줄바꿈한다."""
         lines = []
@@ -311,12 +358,28 @@ class SlideRenderer:
         return lines
 
     def render_title(self, slide: dict, page: int, total: int) -> "Image.Image":
-        """타이틀 슬라이드 렌더링."""
+        """타이틀 슬라이드 렌더링.
+
+        헤더 강조: 타이틀 슬라이드의 헤더 폰트 크기를 10% 키우고 하단에 3px 밑줄 라인 추가.
+        """
         img, draw = self._make_base_image(gradient=True)
         title = slide.get("title", "")
         subtitle = slide.get("subtitle", "")
 
-        self._draw_header(draw, "", is_title_page=True)
+        # 타이틀 페이지 헤더 - 폰트 10% 증가 (34 -> 38), 3px 밑줄 라인
+        draw.rectangle([0, 0, W, HEADER_H], fill=self.theme["header_bg"])
+        draw.rectangle([0, HEADER_H - 3, W, HEADER_H], fill=self.theme["accent"])
+        if self.channel_name:
+            header_font_title = self._font(38, bold=True)  # 34 * 1.10 ~ 38
+            draw.text(
+                (MARGIN_X, HEADER_H // 2),
+                self.channel_name[:70],
+                font=header_font_title,
+                fill=self.theme["text_primary"],
+                anchor="lm",
+            )
+        # 헤더 하단 3px 강조 라인 (accent 라인 위에 추가 강조)
+        draw.rectangle([0, HEADER_H, W, HEADER_H + 3], fill=self.theme["accent_light"])
 
         tfont = self._font(68, bold=True)
         lines = self._wrap_text(draw, title, tfont, W - MARGIN_X * 2)
@@ -348,6 +411,8 @@ class SlideRenderer:
                 draw.text((x, y2), sline, font=sfont, fill=self.theme["text_secondary"])
                 y2 += 42
 
+        # 하단 브랜딩 바 추가
+        self._draw_branding_bar(img, draw)
         return img
 
     def render_content(self, slide: dict, page: int, total: int) -> "Image.Image":
@@ -376,6 +441,8 @@ class SlideRenderer:
                 draw.text((MARGIN_X + 25, y + i * 38), line, font=bfont, fill=color)
             y += spacing
 
+        # 하단 브랜딩 바 추가
+        self._draw_branding_bar(img, draw)
         return img
 
     def render_summary(self, slide: dict, page: int, total: int) -> "Image.Image":
@@ -407,6 +474,8 @@ class SlideRenderer:
                     fill=self.theme["divider"],
                 )
 
+        # 하단 브랜딩 바 추가
+        self._draw_branding_bar(img, draw)
         return img
 
     def render_content_with_chart(
@@ -464,6 +533,8 @@ class SlideRenderer:
             logger.warning(f"[SlideRenderer] 차트 이미지 로드 실패 - 폴백: {e}")
             return self.render_content(slide, page, total)
 
+        # 하단 브랜딩 바 추가
+        self._draw_branding_bar(img, draw)
         return img
 
     def render_quote(self, slide: dict, page: int, total: int) -> "Image.Image":
@@ -489,6 +560,8 @@ class SlideRenderer:
             y += 65
 
         self._draw_footer(draw, slide.get("source", ""), page, total)
+        # 하단 브랜딩 바 추가
+        self._draw_branding_bar(img, draw)
         return img
 
 
