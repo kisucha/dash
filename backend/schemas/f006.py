@@ -63,7 +63,7 @@ class F006JobCreateRequest(BaseModel):
     # kenburns: Remotion + Ken Burns 애니메이션 (PNG 슬라이드 유지)
     # video_bg: Remotion + 애니메이션 그라디언트 배경 + 텍스트 JSON 렌더링 (PNG 없음)
     # remotion_native: Remotion 전체 네이티브 렌더링 (PNG 없음, 차트 애니메이션 포함)
-    render_mode: str = Field(default="ffmpeg", description="렌더링 모드 (ffmpeg/kenburns/video_bg/remotion_native)")
+    render_mode: str = Field(default="ffmpeg", description="렌더링 모드 (ffmpeg/kenburns/video_bg/remotion_native/cardnews)")
     # [DEPRECATED] Remotion 렌더링 사용 여부 — render_mode 도입으로 deprecated. 하위 호환성 유지
     use_remotion: bool = Field(default=False, description="[DEPRECATED] Remotion 렌더링 활성화 — render_mode='kenburns' 사용 권장")
     # Remotion 테마 선택 (dark_blue/warm_gray/clean_white)

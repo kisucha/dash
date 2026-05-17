@@ -190,7 +190,8 @@ async function submitCreateJob() {
     privacy: privacy.value,
     render_mode: renderMode.value,
     // Remotion 모드 하위 호환 — 백엔드 기존 use_remotion 필드 지원
-    use_remotion: renderMode.value !== 'ffmpeg',
+    // cardnews는 FFmpeg 사용이므로 Remotion 미포함
+    use_remotion: ['kenburns', 'video_bg', 'remotion_native'].includes(renderMode.value),
     ...(renderMode.value !== 'ffmpeg' ? {
       remotion_theme: remotionTheme.value,
       remotion_transition: remotionTransition.value,
@@ -603,6 +604,18 @@ onMounted(async () => {
                 <div class="render-mode-desc">차트 애니메이션 + 숫자 카운터. 최고 품질.</div>
                 <div class="render-mode-badge premium">최고 품질</div>
               </div>
+
+              <!-- 카드뉴스 -->
+              <div
+                class="render-mode-card"
+                :class="{ selected: renderMode === 'cardnews' }"
+                @click="renderMode = 'cardnews'"
+              >
+                <div class="render-mode-icon">🗞️</div>
+                <div class="render-mode-title">카드뉴스</div>
+                <div class="render-mode-desc">타입별 완전히 다른 레이아웃. 강한 시각적 계층.</div>
+                <div class="render-mode-badge cardnews">리디자인</div>
+              </div>
             </div>
 
             <!-- Remotion 추가 설정 (kenburns/video_bg/remotion_native 선택 시) -->
@@ -700,7 +713,7 @@ onMounted(async () => {
             </div>
             <div class="summary-row">
               <span>렌더링 방식</span>
-              <strong>{{ {ffmpeg: '기본 (FFmpeg)', kenburns: 'Ken Burns', video_bg: '영상 배경', remotion_native: '네이티브 렌더링'}[renderMode] }}</strong>
+              <strong>{{ {ffmpeg: '기본 (FFmpeg)', kenburns: 'Ken Burns', video_bg: '영상 배경', remotion_native: '네이티브 렌더링', cardnews: '카드뉴스'}[renderMode] }}</strong>
             </div>
             <div class="summary-row" v-if="renderMode !== 'ffmpeg'">
               <span>테마</span>
@@ -1400,6 +1413,11 @@ onMounted(async () => {
 .render-mode-badge.premium {
   background: #fef9c3;
   color: #a16207;
+}
+
+.render-mode-badge.cardnews {
+  background: #fce7f3;
+  color: #9d174d;
 }
 
 .remotion-extra {

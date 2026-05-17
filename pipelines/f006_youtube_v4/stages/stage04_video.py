@@ -565,6 +565,337 @@ class SlideRenderer:
         return img
 
 
+# -- 카드뉴스 테마 상수 --
+CARDNEWS_THEMES = {
+    "dark_blue": {
+        "bg":             (10, 22, 40),
+        "accent":         (74, 159, 212),    # #4a9fd4
+        "accent_dark":    (14, 36, 84),      # 헤더 블록
+        "text_primary":   (255, 255, 255),
+        "text_secondary": (160, 200, 230),
+        "number_bg":      (74, 159, 212),
+        "number_text":    (255, 255, 255),
+        "check_color":    (74, 159, 212),
+        "divider":        (40, 80, 130),
+        "channel_bar":    (8, 16, 32),
+    },
+    "warm_gray": {
+        "bg":             (26, 22, 20),
+        "accent":         (232, 165, 75),    # #e8a54b
+        "accent_dark":    (45, 35, 25),
+        "text_primary":   (245, 237, 224),
+        "text_secondary": (180, 155, 120),
+        "number_bg":      (232, 165, 75),
+        "number_text":    (26, 22, 20),
+        "check_color":    (232, 165, 75),
+        "divider":        (70, 55, 40),
+        "channel_bar":    (15, 12, 10),
+    },
+    "clean_white": {
+        "bg":             (248, 249, 250),
+        "accent":         (37, 99, 235),     # #2563eb
+        "accent_dark":    (30, 64, 175),
+        "text_primary":   (15, 23, 42),
+        "text_secondary": (71, 85, 105),
+        "number_bg":      (37, 99, 235),
+        "number_text":    (255, 255, 255),
+        "check_color":    (37, 99, 235),
+        "divider":        (203, 213, 225),
+        "channel_bar":    (15, 23, 42),
+    },
+}
+
+
+class CardNewsRenderer:
+    """카드뉴스 스타일 슬라이드 렌더러.
+
+    슬라이드 타입별로 완전히 다른 레이아웃을 사용한다.
+    페이지 번호 없음.
+    SlideRenderer와 독립적으로 동작하며 CARDNEWS_THEMES를 사용한다.
+    """
+
+    W, H = 1280, 720
+
+    def __init__(self, theme_name: str = "dark_blue", channel_name: str = ""):
+        # CARDNEWS_THEMES에서 테마 딕셔너리를 가져온다. 없으면 dark_blue 폴백.
+        self.theme = CARDNEWS_THEMES.get(theme_name, CARDNEWS_THEMES["dark_blue"])
+        # 하단 채널 브랜딩 바에 표시할 채널명
+        self.channel_name = channel_name
+        # 사용자 지정 폰트 경로 목록 (빈 리스트면 기본 FONT_CANDIDATES 사용)
+        self._extra: list[str] = []
+
+    def set_custom_font(self, font_path: str) -> None:
+        """사용자 지정 폰트 경로를 설정한다."""
+        self._extra = [font_path] if font_path else []
+
+    def _font(self, size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
+        """self._extra를 추가해 _load_font를 호출하는 헬퍼."""
+        return _load_font(size, bold=bold, extra_candidates=self._extra)
+
+    def _base_image(self):
+        """단색 배경 이미지와 Draw 객체를 반환한다."""
+        from PIL import Image, ImageDraw
+        img = Image.new("RGB", (self.W, self.H), self.theme["bg"])
+        draw = ImageDraw.Draw(img)
+        return img, draw
+
+    def _draw_channel_bar(self, img, draw) -> None:
+        """하단 48px 채널 브랜딩 바를 그린다.
+
+        바 상단에 2px accent 라인을 추가하고 채널명을 표시한다.
+        채널명이 없어도 바 자체는 그린다.
+        """
+        bar_h = 48
+        y = self.H - bar_h
+        draw.rectangle([0, y, self.W, self.H], fill=self.theme["channel_bar"])
+        # 상단 2px accent 라인
+        draw.rectangle([0, y, self.W, y + 2], fill=self.theme["accent"])
+        if self.channel_name:
+            font = self._font(18, bold=False)
+            draw.text((40, y + 14), self.channel_name, font=font, fill=self.theme["text_secondary"])
+
+    def render_title(self, slide: dict) -> "Image.Image":
+        """title 슬라이드: 상단 채널 바 + 중앙 accent 세로 바 + 대형 주제 텍스트."""
+        from PIL import Image, ImageDraw
+        img, draw = self._base_image()
+        t = self.theme
+
+        title_text = _normalize_text(slide.get("title", slide.get("header", "")))
+        subtitle = _normalize_text(slide.get("subtitle", ""))
+        if not subtitle:
+            # bullets 첫 항목을 서브타이틀로 사용
+            bullets = slide.get("bullets", [])
+            subtitle = _normalize_text(bullets[0]) if bullets else ""
+
+        # 상단 채널 바 (60px) - accent_dark 배경 + 하단 2px accent 라인
+        draw.rectangle([0, 0, self.W, 60], fill=t["channel_bar"])
+        draw.rectangle([0, 58, self.W, 60], fill=t["accent"])
+        if self.channel_name:
+            ch_font = self._font(20, bold=False)
+            draw.text((40, 18), self.channel_name, font=ch_font, fill=t["text_secondary"])
+
+        # 중앙 컨텐츠 영역: Y 80 ~ H-60
+        content_y_start = 80
+        content_y_end = self.H - 60
+
+        # 제목 텍스트 (최대 2줄, 크게)
+        title_font = self._font(62, bold=True)
+        side_bar_x = 100
+        title_x = side_bar_x + 20
+        title_max_w = self.W - title_x - 80
+        title_lines = self._wrap_text(title_text, title_font, title_max_w)[:2]
+
+        line_h = 72
+        total_title_h = len(title_lines) * line_h
+        title_y = (content_y_start + content_y_end) // 2 - total_title_h // 2 - 20
+
+        # accent 세로 바 (좌측 6px, 제목 높이만큼)
+        draw.rectangle(
+            [side_bar_x, title_y - 8, side_bar_x + 6, title_y + total_title_h + 8],
+            fill=t["accent"]
+        )
+
+        # 제목 텍스트 출력
+        for i, line in enumerate(title_lines):
+            draw.text((title_x, title_y + i * line_h), line, font=title_font, fill=t["text_primary"])
+
+        # 서브타이틀 (제목 아래 1줄)
+        if subtitle:
+            sub_font = self._font(24, bold=False)
+            sub_y = title_y + total_title_h + 20
+            sub_lines = self._wrap_text(subtitle, sub_font, title_max_w)[:1]
+            for line in sub_lines:
+                draw.text((title_x, sub_y), line, font=sub_font, fill=t["text_secondary"])
+
+        self._draw_channel_bar(img, draw)
+        return img
+
+    def render_content(self, slide: dict) -> "Image.Image":
+        """content 슬라이드: accent_dark 헤더 + 번호 박스 + 항목 목록."""
+        from PIL import Image, ImageDraw
+        img, draw = self._base_image()
+        t = self.theme
+
+        header_text = _normalize_text(slide.get("title", slide.get("header", "")))
+        bullets = [_normalize_text(b) for b in slide.get("bullets", [])]
+
+        # 헤더 영역 (80px) - accent_dark 배경 + 좌측 6px accent 바
+        draw.rectangle([0, 0, self.W, 80], fill=t["accent_dark"])
+        draw.rectangle([0, 0, 6, 80], fill=t["accent"])
+        header_font = self._font(32, bold=True)
+        draw.text((30, 22), header_text, font=header_font, fill=t["text_primary"])
+
+        # 항목 목록 - Y=105부터 시작
+        item_y = 105
+        item_max_w = self.W - 200  # 번호 박스(70px) + 여백
+        item_font = self._font(24, bold=True)
+        desc_font = self._font(18, bold=False)
+        number_size = 48  # 번호 박스 크기 (정사각형)
+        item_gap = 20     # 항목 간 간격
+
+        for i, bullet in enumerate(bullets[:5]):
+            if item_y + number_size > self.H - 60:
+                break
+
+            # 번호 박스 (정사각형, number_bg 색상)
+            box_x, box_y = 50, item_y
+            draw.rectangle(
+                [box_x, box_y, box_x + number_size, box_y + number_size],
+                fill=t["number_bg"]
+            )
+
+            # 번호 텍스트 중앙 정렬 (01, 02, ...)
+            num_font = self._font(22, bold=True)
+            num_text = f"{i+1:02d}"
+            num_bbox = draw.textbbox((0, 0), num_text, font=num_font)
+            nw = num_bbox[2] - num_bbox[0]
+            nh = num_bbox[3] - num_bbox[1]
+            draw.text(
+                (box_x + (number_size - nw) // 2, box_y + (number_size - nh) // 2 - 2),
+                num_text, font=num_font, fill=t["number_text"]
+            )
+
+            # bullet 텍스트: " — " 또는 ": " 구분자로 굵은 본문 + 설명 분리
+            text_x = box_x + number_size + 18
+            parts = bullet.split(" -- ", 1) if " -- " in bullet else bullet.split(": ", 1)
+            if len(parts) == 2:
+                main_part, desc_part = parts
+                main_lines = self._wrap_text(main_part, item_font, item_max_w)[:1]
+                draw.text(
+                    (text_x, box_y + 4),
+                    main_lines[0] if main_lines else main_part,
+                    font=item_font, fill=t["text_primary"]
+                )
+                desc_lines = self._wrap_text(desc_part, desc_font, item_max_w)[:1]
+                draw.text(
+                    (text_x, box_y + 32),
+                    desc_lines[0] if desc_lines else desc_part,
+                    font=desc_font, fill=t["text_secondary"]
+                )
+            else:
+                main_lines = self._wrap_text(bullet, item_font, item_max_w)[:2]
+                for li, ml in enumerate(main_lines):
+                    draw.text((text_x, box_y + li * 28), ml, font=item_font, fill=t["text_primary"])
+
+            item_y += number_size + item_gap
+
+        self._draw_channel_bar(img, draw)
+        return img
+
+    def render_summary(self, slide: dict) -> "Image.Image":
+        """summary 슬라이드: 상단 accent 블록 + 체크마크 목록."""
+        from PIL import Image, ImageDraw
+        img, draw = self._base_image()
+        t = self.theme
+
+        header_text = _normalize_text(slide.get("title", slide.get("header", "핵심 정리")))
+        bullets = [_normalize_text(b) for b in slide.get("bullets", [])]
+
+        # 상단 accent 블록 (120px) - accent_dark 배경 + 하단 4px accent 라인
+        draw.rectangle([0, 0, self.W, 120], fill=t["accent_dark"])
+        draw.rectangle([0, 118, self.W, 122], fill=t["accent"])
+        # SUMMARY 레이블 (소문자 스타일)
+        label_font = self._font(18, bold=False)
+        draw.text((40, 16), "SUMMARY", font=label_font, fill=t["accent"])
+        # 헤더 제목
+        title_font = self._font(38, bold=True)
+        draw.text((40, 44), header_text, font=title_font, fill=t["text_primary"])
+
+        # 체크마크 목록 - Y=140부터
+        item_y = 140
+        check_font = self._font(22, bold=False)
+        check_char = "v"  # 특수문자 대신 v 사용 (인코딩 안전)
+
+        for bullet in bullets[:5]:
+            if item_y + 32 > self.H - 60:
+                break
+            # 체크마크 기호
+            draw.text((50, item_y), check_char, font=check_font, fill=t["check_color"])
+            # 항목 텍스트 (최대 2줄)
+            lines = self._wrap_text(bullet, check_font, self.W - 120)[:2]
+            for li, line in enumerate(lines):
+                draw.text((90, item_y + li * 28), line, font=check_font, fill=t["text_primary"])
+            item_y += 28 * len(lines) + 16
+
+        self._draw_channel_bar(img, draw)
+        return img
+
+    def render_quote(self, slide: dict) -> "Image.Image":
+        """quote 슬라이드: 대형 인용 기호 + 중앙 인용 텍스트 + 출처."""
+        from PIL import Image, ImageDraw
+        img, draw = self._base_image()
+        t = self.theme
+
+        bullets = slide.get("bullets", [])
+        quote_text = _normalize_text(bullets[0]) if bullets else _normalize_text(slide.get("title", ""))
+        source_text = _normalize_text(bullets[1]) if len(bullets) > 1 else ""
+
+        # 대형 인용 기호 (좌상단)
+        quote_mark_font = self._font(120, bold=True)
+        draw.text((60, 40), '"', font=quote_mark_font, fill=t["accent"])
+
+        # 인용 텍스트 (중앙 정렬)
+        quote_font = self._font(32, bold=False)
+        lines = self._wrap_text(quote_text, quote_font, self.W - 160)[:4]
+        total_h = len(lines) * 44
+        start_y = (self.H - 60) // 2 - total_h // 2 + 20
+        for i, line in enumerate(lines):
+            draw.text((80, start_y + i * 44), line, font=quote_font, fill=t["text_primary"])
+
+        # 구분선 + 출처 텍스트
+        if source_text:
+            line_y = start_y + total_h + 20
+            draw.rectangle([80, line_y, self.W - 80, line_y + 2], fill=t["divider"])
+            src_font = self._font(18, bold=False)
+            draw.text((80, line_y + 10), source_text, font=src_font, fill=t["text_secondary"])
+
+        self._draw_channel_bar(img, draw)
+        return img
+
+    def render(self, slide: dict) -> "Image.Image":
+        """슬라이드 타입별 render 메서드를 디스패치한다.
+
+        type 키 기준: title -> render_title, summary -> render_summary,
+        quote -> render_quote, 그 외 -> render_content.
+        """
+        slide_type = slide.get("type", "content")
+        if slide_type == "title":
+            return self.render_title(slide)
+        elif slide_type == "summary":
+            return self.render_summary(slide)
+        elif slide_type == "quote":
+            return self.render_quote(slide)
+        else:
+            return self.render_content(slide)
+
+    @staticmethod
+    def _wrap_text(text: str, font, max_width: int) -> list[str]:
+        """텍스트를 max_width 픽셀에 맞게 단어 단위로 줄바꿈한다.
+
+        임시 이미지의 Draw 객체로 텍스트 폭을 측정한다.
+        단어 단위로 추가하며 max_width 초과 시 개행한다.
+        """
+        from PIL import ImageDraw, Image
+        tmp = Image.new("RGB", (1, 1))
+        tmp_draw = ImageDraw.Draw(tmp)
+
+        words = text.split()
+        lines = []
+        current = ""
+        for word in words:
+            test = (current + " " + word).strip()
+            bbox = tmp_draw.textbbox((0, 0), test, font=font)
+            if bbox[2] - bbox[0] <= max_width:
+                current = test
+            else:
+                if current:
+                    lines.append(current)
+                current = word
+        if current:
+            lines.append(current)
+        return lines if lines else [text]
+
+
 class Stage04VideoGen(BaseStage, BasePipeline):
     """F006 STAGE_04 - Pillow 기반 PPT 슬라이드 이미지 생성.
 
@@ -621,6 +952,7 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         selected_topic = input_data.get("selected_topic", "주제")
         theme_name = input_data.get("slide_theme", DEFAULT_THEME)
         channel_name: str = input_data.get("channel_name", "") or input_data.get("channel_category", "")
+        render_mode: str = input_data.get("render_mode", "ffmpeg")
 
         custom_font = input_data.get("slide_font_path", "")
         if custom_font:
@@ -633,6 +965,92 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         )
         output_dir.mkdir(parents=True, exist_ok=True)
 
+        # -- cardnews 모드: CardNewsRenderer로 슬라이드 PNG 생성 후 즉시 반환 --
+        if render_mode == "cardnews":
+            logger.info(
+                f"[F006][STAGE_04][job_id={job_id}] render_mode=cardnews "
+                f"-> CardNewsRenderer (theme={theme_name})"
+            )
+            slides = [_clean_slide(s) for s in slides]
+            cn_renderer = CardNewsRenderer(theme_name=theme_name, channel_name=channel_name)
+            if custom_font:
+                cn_renderer.set_custom_font(custom_font)
+
+            cn_clips: list[dict] = []
+            for slide in slides:
+                slide_no: int = slide.get("slide_no", len(cn_clips) + 1)
+                slide_type: str = slide.get("type", "content")
+                out_path = str(output_dir / f"slide_{slide_no:02d}.png")
+                try:
+                    img = cn_renderer.render(slide)
+                    img.save(out_path, "PNG")
+                    narration: str = slide.get("narration", slide.get("description", ""))
+                    cn_clips.append({
+                        "slide_no": slide_no,
+                        "file_path": out_path,
+                        "duration_sec": 0,      # STAGE_05에서 narration 비례로 재계산
+                        "narration": narration,
+                        "type": slide_type,
+                    })
+                    logger.info(
+                        f"[F006][STAGE_04][job_id={job_id}] "
+                        f"[cardnews] 슬라이드 {slide_no} 완료"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[F006][STAGE_04][job_id={job_id}] "
+                        f"[cardnews] 슬라이드 {slide_no} 실패: {e}"
+                    )
+
+            # 폴백: 전체 실패 시 검정 슬라이드 1장
+            if not cn_clips:
+                fallback_path = str(output_dir / "slide_01.png")
+                try:
+                    from PIL import Image as _PILImage
+                    _PILImage.new("RGB", (W, H), (10, 22, 40)).save(fallback_path, "PNG")
+                    cn_clips.append({
+                        "slide_no": 1,
+                        "file_path": fallback_path,
+                        "duration_sec": 5,
+                        "narration": "",
+                        "type": "content",
+                    })
+                    logger.warning(
+                        f"[F006][STAGE_04][job_id={job_id}] [cardnews] 폴백 슬라이드 생성 완료"
+                    )
+                except Exception as fe:
+                    logger.error(f"[F006][STAGE_04] [cardnews] 폴백 슬라이드 생성 실패: {fe}")
+
+            # 썸네일 - 첫 번째 슬라이드 복사
+            cn_thumbnail: Optional[str] = None
+            if cn_clips:
+                import shutil as _shutil
+                thumb_dir = (
+                    project_root / "storage" / "results" / "f006" / str(job_id) / "thumbnails"
+                )
+                thumb_dir.mkdir(parents=True, exist_ok=True)
+                cn_thumbnail = str(thumb_dir / "thumbnail.png")
+                try:
+                    _shutil.copy2(cn_clips[0]["file_path"], cn_thumbnail)
+                except Exception as te:
+                    logger.warning(f"[F006][STAGE_04] [cardnews] 썸네일 복사 실패: {te}")
+                    cn_thumbnail = None
+
+            logger.info(
+                f"[F006][STAGE_04][job_id={job_id}] [cardnews] 완료 - 슬라이드 {len(cn_clips)}장"
+            )
+            return {
+                "stage_id": "STAGE_04_VIDEO_GEN",
+                "status": "COMPLETED",
+                "generation_backend": "cardnews",
+                "clips": cn_clips,
+                "thumbnail_path": cn_thumbnail,
+                "thumbnail_candidates": [cn_thumbnail] if cn_thumbnail else [],
+                "total_clips": len(cn_clips),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        # -- 이하 기존 PPT 슬라이드(SlideRenderer) 처리 --
         theme = SLIDE_THEMES.get(theme_name, SLIDE_THEMES[DEFAULT_THEME])
         renderer = SlideRenderer(theme=theme, custom_font_path=custom_font, channel_name=channel_name)
         total = len(slides)
