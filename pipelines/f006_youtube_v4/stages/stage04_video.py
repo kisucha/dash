@@ -79,24 +79,75 @@ _FONT_CACHE: dict = {}
 # -- 텍스트 정규화 유틸 --
 
 import re as _re
+import os as _os
+import glob as _glob
+
+# PIL 렌더 시 tofu(□) 원인이 되는 특수문자 → 안전 대체 문자 매핑
+_CHAR_MAP: dict[str, str] = {
+    '—': '-',    # em dash
+    '–': '-',    # en dash
+    '‘': "'",    # left single quote
+    '’': "'",    # right single quote
+    '“': '"',    # left double quote
+    '”': '"',    # right double quote
+    '…': '...',  # ellipsis
+    '·': '-',    # middle dot
+    '•': '*',    # bullet
+    '‣': '*',    # triangular bullet
+    '▶': '>',    # black right-pointing triangle
+    '◀': '<',    # black left-pointing triangle
+    '→': '->',   # rightwards arrow
+    '←': '<-',   # leftwards arrow
+    '↑': '^',    # upwards arrow
+    '↓': 'v',    # downwards arrow
+    '★': '*',    # black star
+    '☆': '*',    # white star
+    '♡': '<3',   # white heart suit
+    '♥': '<3',   # black heart suit
+    '×': 'x',    # multiplication sign
+    '÷': '/',    # division sign
+    '≠': '!=',   # not equal to
+    '≤': '<=',   # less-than or equal to
+    '≥': '>=',   # greater-than or equal to
+    '±': '+-',   # plus-minus sign
+}
+
 
 def _normalize_text(text: str) -> str:
-    """슬라이드 텍스트 정규화 - 인코딩 아티팩트 제거, 특수문자 교체.
+    """슬라이드 텍스트 정규화 - PIL 렌더 토퍼(□) 방지 + 인코딩 아티팩트 제거.
 
-    LLM이 placeholder로 삽입하는 □/■ 계열 문자를 제거하고,
-    ₩ 기호를 '원'으로 교체한다.
+    처리 순서:
+    1. 알려진 특수문자를 안전한 대체 문자로 교체 (_CHAR_MAP)
+    2. 유니코드 기하 도형(U+25A0~U+25FF), 체크박스, 대체문자 제거
+    3. PIL 한글 폰트에서 렌더되지 않는 이모지/잡다한 코드포인트 제거
+    4. ₩ 기호 처리
+    5. 연속 공백 정리
     """
     if not text:
         return text
-    # U+25A0-U+25FF(기하 도형), U+FFFD(대체 문자), U+2610-U+2612(체크박스) 제거
-    text = _re.sub(r'[■-◿�☐☒]', '', text)
-    # ₩X원 -> X원 (₩와 원 동시 존재 시 ₩만 제거)
+
+    # 1. 알려진 특수문자 치환
+    for ch, rep in _CHAR_MAP.items():
+        text = text.replace(ch, rep)
+
+    # 2. 기하 도형(■□△▲▼◆◇, U+25A0~U+25FF), 체크박스, 유니코드 대체문자 제거
+    text = _re.sub(r'[■-◿�☐-☒]', '', text)
+
+    # 3. BMP 초과 코드포인트(U+10000+) 제거 - 이모지, 희귀 CJK 확장 등
+    #    Malgun Gothic 범위 밖 문자 → tofu 원인
+    text = _re.sub(r'[\U00010000-\U0010ffff]', '', text)
+
+    # 4. 사용 빈도 낮은 기타 블록(Combining, Enclosed, Dingbats 일부) 제거
+    text = _re.sub(r'[⌀-⏿]', '', text)   # Miscellaneous Technical
+    text = _re.sub(r'[✀-➿]', '', text)   # Dingbats
+    text = _re.sub(r'[⬀-⯿]', '', text)   # Miscellaneous Symbols and Arrows
+
+    # 5. ₩ 처리
     text = _re.sub(r'₩([\d,]+)원', lambda m: f"{m.group(1)}원", text)
-    # ₩X -> X원 (₩가 숫자 앞에 오고 원 없는 경우)
     text = _re.sub(r'₩([\d,]+)', lambda m: f"{m.group(1)}원", text)
-    # 나머지 고립된 ₩ -> 원
     text = text.replace('₩', '원')
-    # 연속 공백 정리
+
+    # 6. 연속 공백 정리
     text = _re.sub(r'  +', ' ', text).strip()
     return text
 
@@ -157,17 +208,60 @@ def _clean_slide(slide: dict) -> dict:
         result['source'] = _normalize_text(slide.get('source', ''))
     return result
 
-# 한글 폰트 후보 - 절대 경로(Bold) 우선, 이후 Regular, 이후 영문 폴백
-FONT_CANDIDATES = [
-    r"C:\Windows\Fonts\malgunbd.ttf",       # 맑은 고딕 Bold (절대 경로 우선)
+# 한글 폰트 고정 후보 - 존재하는 경우에만 사용
+_FONT_FIXED_CANDIDATES = [
+    r"C:\Windows\Fonts\malgunbd.ttf",       # 맑은 고딕 Bold
     r"C:\Windows\Fonts\malgun.ttf",         # 맑은 고딕 Regular
     r"C:\Windows\Fonts\NanumGothicBold.ttf",
     r"C:\Windows\Fonts\NanumGothic.ttf",
+    r"C:\Windows\Fonts\gulimche.ttf",       # 굴림체
+    r"C:\Windows\Fonts\gulim.ttc",
+    r"C:\Windows\Fonts\batang.ttc",
     r"C:\Windows\Fonts\arialbd.ttf",
     r"C:\Windows\Fonts\arial.ttf",
-    "malgunbd.ttf",
-    "malgun.ttf",
 ]
+
+
+def _discover_fonts() -> list[str]:
+    """Windows Fonts 디렉토리를 glob으로 탐색해 한국어 지원 폰트 후보를 반환한다.
+
+    고정 후보(존재 확인) + glob 탐색(malgun*/Nanum*) 순서로 구성한다.
+    반복 호출 방지를 위해 결과를 모듈 수준 변수에 캐싱한다.
+    """
+    if _discovered_fonts_cache:
+        return _discovered_fonts_cache
+
+    found: list[str] = []
+    # 고정 후보 - 존재하는 경우에만 추가
+    for p in _FONT_FIXED_CANDIDATES:
+        if _os.path.exists(p):
+            found.append(p)
+            logger.debug(f"[폰트 발견] {p}")
+
+    # glob으로 추가 탐색 - 설치 위치가 다를 수 있는 환경 대응
+    for pattern in [
+        r"C:\Windows\Fonts\malgun*.ttf",
+        r"C:\Windows\Fonts\Malgun*.ttf",
+        r"C:\Windows\Fonts\Nanum*.ttf",
+        r"C:\Windows\Fonts\nanum*.ttf",
+    ]:
+        for p in _glob.glob(pattern):
+            if p not in found:
+                found.append(p)
+                logger.debug(f"[폰트 glob 발견] {p}")
+
+    if not found:
+        logger.error(
+            "[폰트] 한국어 폰트를 하나도 찾지 못했습니다. "
+            "C:\\Windows\\Fonts\\malgun.ttf 존재 여부를 확인하세요."
+        )
+
+    _discovered_fonts_cache.extend(found)
+    return _discovered_fonts_cache
+
+
+# 모듈 수준 폰트 탐색 결과 캐시 (최초 1회만 탐색)
+_discovered_fonts_cache: list[str] = []
 
 
 def _load_font(
@@ -175,7 +269,13 @@ def _load_font(
     bold: bool = False,
     extra_candidates: list[str] | None = None,
 ) -> "ImageFont.FreeTypeFont":
-    """폰트를 크기/굵기 키로 캐싱해 반환한다."""
+    """한글 지원 폰트를 크기/굵기 키로 캐싱해 반환한다.
+
+    우선순위:
+      1. extra_candidates (사용자 지정 경로)
+      2. Bold 요청이면 Bold 파일 우선, 아니면 Regular 우선
+      3. 전체 실패 시 default font 반환 (캐싱 안 함 — 다음 호출에서 재시도)
+    """
     from PIL import ImageFont
 
     extra = extra_candidates or []
@@ -183,21 +283,38 @@ def _load_font(
     if cache_key in _FONT_CACHE:
         return _FONT_CACHE[cache_key]
 
-    base = FONT_CANDIDATES if bold else [FONT_CANDIDATES[1]] + FONT_CANDIDATES
-    candidates = extra + base
+    discovered = _discover_fonts()
+
+    # bold 요청이면 Bold 파일을 앞으로, 아니면 Regular 우선
+    if bold:
+        ordered = discovered
+    else:
+        regular = [p for p in discovered if "bd" not in _os.path.basename(p).lower()
+                   and "bold" not in _os.path.basename(p).lower()
+                   and "Bold" not in _os.path.basename(p)]
+        bold_list = [p for p in discovered if p not in regular]
+        ordered = regular + bold_list
+
+    candidates = extra + ordered
 
     for path in candidates:
+        if not _os.path.exists(path):
+            continue
         try:
             font = ImageFont.truetype(path, size=size)
+            logger.debug(f"[폰트 로드 성공] {path} size={size} bold={bold}")
             _FONT_CACHE[cache_key] = font
             return font
-        except Exception:
+        except Exception as e:
+            logger.debug(f"[폰트 로드 실패] {path} - {e}")
             continue
 
-    logger.warning(f"한글 폰트 로드 실패. 기본 폰트 사용 (size={size})")
-    font = ImageFont.load_default()
-    _FONT_CACHE[cache_key] = font
-    return font
+    # 전체 실패 - 캐싱하지 않아 다음 호출에서 재시도
+    logger.warning(
+        f"[폰트] 한글 폰트 로드 전체 실패 (size={size}, bold={bold}). "
+        f"기본 폰트 사용 — 한국어가 □로 표시될 수 있습니다."
+    )
+    return ImageFont.load_default()
 
 
 class SlideRenderer:
@@ -210,7 +327,7 @@ class SlideRenderer:
     def __init__(self, theme: dict, custom_font_path: str = "", channel_name: str = ""):
         # 테마 딕셔너리 - 색상 참조에 사용
         self.theme = theme
-        # 사용자 지정 폰트 경로 - 전역 FONT_CANDIDATES 변경 없이 우선 탐색
+        # 사용자 지정 폰트 경로 - _discover_fonts() 탐색 결과보다 우선 적용
         self._extra: list[str] = [custom_font_path] if custom_font_path else []
         # 채널 이름 - 슬라이드 헤더 브랜딩에 표시 (미입력 시 빈 문자열)
         self.channel_name: str = channel_name
@@ -621,7 +738,7 @@ class CardNewsRenderer:
         self.theme = CARDNEWS_THEMES.get(theme_name, CARDNEWS_THEMES["dark_blue"])
         # 하단 채널 브랜딩 바에 표시할 채널명
         self.channel_name = channel_name
-        # 사용자 지정 폰트 경로 목록 (빈 리스트면 기본 FONT_CANDIDATES 사용)
+        # 사용자 지정 폰트 경로 목록 (빈 리스트면 _discover_fonts() 사용)
         self._extra: list[str] = []
 
     def set_custom_font(self, font_path: str) -> None:
