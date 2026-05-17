@@ -1,5 +1,38 @@
 # Dash 변경 이력
 
+## [2026-05-17 20:30] F005 STAGE_04 채널 카테고리별 배경 이미지 생성 기능 추가
+
+- 변경 내용:
+  - **신규 파일: `pipelines/f005_youtube_v3/stages/image_fetcher.py`** (230줄)
+    - `_CATEGORY_GROUP_MAP`: 22개 채널 카테고리 문자열 → 그룹명 매핑 (IT/기술→technology, 건강→health, 요리→food, 문화→culture 등)
+    - `_GROUP_PALETTE`: 그룹별 Pillow 폴백 색상 팔레트 (배경색 RGB, 강조색1 RGB, 강조색2 RGB)
+    - `detect_category_group(channel_category)`: 채널 카테고리 문자열을 그룹명으로 변환 (부분 일치), 불일치 시 'default' 반환
+    - `fetch_slide_image(channel_category, slide_index, output_path, size, timeout)`: 
+      - 1차 전략: loremflickr.com/{width}/{height}/{group}?lock={index} 실사 이미지 다운로드
+      - 2차 폴백: 네트워크 실패 시 Pillow로 추상 그래디언트 + 원/라인 패턴 생성 (항상 성공 보장)
+      - 반환: True(저장 성공) / False(완전 실패)
+    - `_generate_pillow_background(group, output_path, size)`: 카테고리 그룹별 시드 기반 재현 가능 패턴 생성
+
+  - **기존 파일 수정: `pipelines/f005_youtube_v3/stages/stage04_video.py`** (615줄 → 750줄)
+    - execute() 메서드 수정: channel_category 읽어 이미지 전략 3방향 라우팅
+      - 금융 카테고리 + 티커 존재 → ChartGenerator 사용 (yfinance 차트)
+      - 비금융 카테고리 또는 티커 없음 + 카테고리 있음 → image_fetcher 사용
+      - 카테고리 불명 → 텍스트 전용 레이아웃 (기존 폴백)
+    - bg_images 디렉토리: storage/results/f005/{job_id}/bg_images/bg_{nn}.png
+    - render_content_with_chart 메서드를 차트/이미지 공통으로 재사용
+
+- 변경 이유:
+  - 사용자 요청: F005 STAGE_04에서 금융 외 채널(IT/기술, 건강/운동, 요리/음식, 문화/예술 등)에도 우측 40% 패널에 관련 이미지 자동 삽입
+  - 차트 없는 채널도 시각적 풍부성 제공 필요
+
+- 영향 범위:
+  - 파이프라인: image_fetcher.py 신규 모듈 (230줄)
+  - 파이프라인: stage04_video.py 수정 (135줄 추가)
+  - 저장 경로: bg_images 하위 bg_00.png ~ bg_nn.png
+  - 성능: 이미지 다운로드 타임아웃 5초, Pillow 폴백 시 생성 시간 <1초
+
+- 담당 에이전트: Claude (Historian)
+
 ## [2026-05-17 09:15] F005 유튜브 컨텐츠 제작 파이프라인 전체 구현 완료
 
 - 변경 내용:
@@ -694,6 +727,82 @@
 
 ---
 
+## [2026-05-17 현재] F006 유튜브 컨텐츠 제작 V4 — Remotion 기반 동영상 렌더링 (STAGE_05R)
+
+- 변경 내용:
+
+### 신규 생성 파일 (Remotion 프로젝트)
+
+**TypeScript/React 컴포넌트**
+- `pipelines/f006_youtube_v4/remotion/package.json` — remotion 4.0.290, @remotion/transitions 2.x, react 18.2.0
+- `pipelines/f006_youtube_v4/remotion/remotion.config.ts` — h264 비디오 코덱, jpeg 이미지 포맷, 프레임레이트 30fps
+- `pipelines/f006_youtube_v4/remotion/tsconfig.json` — TypeScript 5.x 설정
+- `pipelines/f006_youtube_v4/remotion/src/themes.ts` — 3종 테마 정의
+  - dark_blue: 진한 파란색(#0f172a 배경)
+  - warm_gray: 따뜻한 그레이(#2a2a2a 배경)
+  - clean_white: 깔끔한 화이트(#f5f5f5 배경)
+- `pipelines/f006_youtube_v4/remotion/src/Root.tsx` — Composition 레지스트리, durationInFrames 동적 계산
+  - Composition ID: 'F006Video'
+  - fps: 30, durationInFrames: narration_duration_sec × 30
+- `pipelines/f006_youtube_v4/remotion/src/F006Video.tsx` — 메인 비디오 컴포넌트 (648줄)
+  - SlideRenderer: 각 슬라이드 배경색/제목/텍스트/자막 렌더링
+  - Transition 시스템: fade/slide/wipe/clockWipe (@remotion/transitions 사용)
+  - 자막 오버레이: SRT 파싱 → Subtitle 컴포넌트 (opacity, y-position animation)
+  - 슬라이드별 duration: narration 필드 기반 비례 배분
+
+**Python 스테이지**
+- `pipelines/f006_youtube_v4/stages/stage05r_remotion.py` — Stage05rRemotion 클래스 (459줄)
+  - `_compute_slide_durations(narration_list, total_sec)`: 나레이션 길이 기반 비례 배분
+  - `_generate_remotion_props(clips)`: remotion_props.json 생성 (슬라이드 메타데이터)
+  - `_run_remotion_render()`: npx remotion render → output_remotion.mp4
+  - `_run_remotion_still()`: npx remotion still → thumbnail_remotion.png
+  - 예외 처리: Node.js/npm 미설치 시 graceful fallback
+
+### 수정 파일
+
+**Backend**
+- `pipelines/f006_youtube_v4/orchestrator.py`
+  - STAGE_05_EDIT에서 use_remotion 플래그 분기:
+    - True: Stage05rRemotion (새로운 Remotion 경로)
+    - False: Stage05Edit (기존 FFmpeg 경로, 기본값)
+  - _get_stage_input() 메서드: remotion 파라미터 추가 (remotion_theme, remotion_transition, remotion_concurrency)
+
+- `backend/schemas/f006.py`
+  - F006JobCreateRequest 스키마 확장:
+    - `use_remotion: bool = False` — Remotion 사용 여부
+    - `remotion_theme: str = "dark_blue"` — dark_blue/warm_gray/clean_white 선택
+    - `remotion_transition: str = "auto"` — auto/fade_only/slide_only 선택
+    - `remotion_concurrency: int = 4` — 병렬 렌더링 스레드 (1~16)
+
+**Frontend**
+- `frontend/src/views/F006View.vue`
+  - Step 3 "미디어 및 출력 설정" 섹션에 Remotion 옵션 UI 추가:
+    - `<input type="checkbox" v-model="useRemotion">` — Remotion 사용 체크박스
+    - 테마 선택: `<select v-model="remotionTheme">` (dark_blue/warm_gray/clean_white)
+    - 전환 효과: `<select v-model="remotionTransition">` (auto/fade_only/slide_only)
+    - 동시성: `<input type="number" v-model.number="remotionConcurrency" min="1" max="16">`
+    - 체크박스 미체크 시 Remotion 필드 비활성화
+
+- 요청 바디 변경 (startGeneration):
+  - `use_remotion`, `remotion_theme`, `remotion_transition`, `remotion_concurrency` 조건부 포함
+
+- 변경 이유:
+  1. FFmpeg concat만으로는 시각적 전환 효과(fade/slide) 지원 어려움 → Remotion으로 고급 렌더링
+  2. React 기반으로 슬라이드 레이아웃 완전 제어 가능 (테마별 스타일 동적 생성)
+  3. 자막 오버레이 애니메이션: SRT 기반으로 자막 타이밍 정확성 보장
+  4. 배경 이미지/색상 적용: 슬라이드별로 theme 기반 배경 동적 적용 가능
+  5. 병렬 렌더링: 동영상 길이가 1시간 이상일 때 다중 코어 활용으로 속도 향상
+
+- 영향 범위:
+  - Backend: orchestrator.py (+use_remotion 분기 로직), schemas/f006.py (+4 필드)
+  - Frontend: F006View.vue (+Remotion 폼 UI)
+  - Pipeline: stage05r_remotion.py (459줄 신규 스테이지)
+  - Remotion: src/themes.ts, src/Root.tsx, src/F006Video.tsx (TypeScript/React 신규 구현)
+
+- 담당 에이전트: pipeline-builder (stage05r_remotion.py), api-builder (orchestrator, schemas), web-builder (F006View.vue)
+
+---
+
 ## [2026-05-12] 컴퓨터 복원 후 개발 환경 재구축
 
 - 변경 내용:
@@ -1114,6 +1223,74 @@
 - 검증 완료:
   - Python AST 구문 검사 (chart_generator.py, stage04_video.py) 통과 ✓
   - 지표 감지 로직: "RSI", "마카드", "볼린저" 등 한글/영어 키워드 인식 ✓
+
+---
+
+## [2026-05-17] F006 유튜브 컨텐츠 제작 V4 파이프라인 신규 구현
+
+- 변경 내용:
+
+### 신규 파일 (30개):
+- **백엔드 스키마/서비스/라우터**:
+  - `backend/schemas/f006.py`: F006CreateRequest, F006JobResponse, F006StageResponse, F006ApproveRequest 등 8개 스키마
+  - `backend/services/f006_service.py`: F006Service 클래스 (8개 메서드: list_jobs, get_job, create_job, skip_stage, retry_stage, reject_stage, approve_job, update_stage_status)
+  - `backend/routers/f006.py`: 14개 엔드포인트 (/jobs, /jobs/{job_id}, /jobs/create, /jobs/{job_id}/approve 등)
+
+- **파이프라인 모듈 (pipelines/f006_youtube_v4/ 전체 - 15개 파일)**:
+  - `orchestrator.py`: F006Orchestrator 클래스 (8단계 순차 실행, F005 기반 복사)
+  - `run_orchestrator.py`: subprocess 진입점
+  - `config.json`: 모델/경로 설정 (output_base_dir=storage/results/f006)
+  - `stages/__init__.py`: BaseStage, ValidationResult 인터페이스
+  - `stages/stage01_input.py`: 채팅 입력 + SearXNG + Ollama 통합
+  - `stages/stage02_script.py`: 스크립트 생성 + 씬 분해
+  - `stages/stage03_tts.py`: TTS 생성
+  - `stages/stage04_video.py`: 이미지/지표 차트 생성
+  - `stages/stage05_image_fetch.py`: 카테고리별 배경 이미지 다운로드
+  - `stages/stage06_edit.py`: FFmpeg concat
+  - `stages/stage07_upload.py`: SEO + YouTube 준비
+  - `stages/stage08_finalize.py`: 최종 처리
+  - `validators/__init__.py`: 검증 인터페이스
+  - `validators/stage_validator.py`: 반송 메커니즘
+
+- **프론트엔드 (4개 파일)**:
+  - `frontend/src/store/f006.js`: useF006Store (Pinia)
+  - `frontend/src/views/F006View.vue`: 메인 페이지 (에메랄드 그린 #059669 색상)
+  - `frontend/src/views/F006JobDetailView.vue`: 상세 뷰
+
+### 수정 파일 (5개):
+- **backend/main.py**:
+  - f006 라우터 등록: `app.include_router(f006_router.router, prefix="/api/f006", tags=["f006"])`
+  - `/results/f006` StaticFiles 마운트
+  - `_restore_f006_running_jobs()` 추가 (서버 시작 시 RUNNING 작업 복구)
+
+- **frontend/src/api/index.js**:
+  - 8개 F006 API 함수 추가 (getF006Jobs, getF006Job, createF006Job, retryF006Stage, rejectF006Stage, approveF006Job, skipF006Stage, selectF006Topic)
+
+- **frontend/src/router/index.js**:
+  - F006 라우트 등록: /features/F006 → F006View, /f006/jobs/:jobId → F006JobDetailView
+
+- **frontend/src/views/DashboardView.vue**:
+  - F006 작업 폴링 추가
+  - F006 이력 표시
+  - F006 클릭 시 /features/F006으로 라우팅
+
+- 변경 이유:
+  1. F005 기반 독립 F006 파이프라인 생성 (사용자 요청)
+  2. 현재는 F005와 동일 기능, 향후 기능 추가 예정
+  3. 독립성 철칙: F006은 F005 코드 일체 import 없음, feature_id='F006', API prefix=/api/f006
+
+- 영향 범위:
+  - 신규 파일: 30개 (schemas, services, routers, pipelines/f006 전체, frontend store/views)
+  - 수정 파일: 5개 (main.py, api/index.js, router/index.js, DashboardView.vue)
+  - 색상: 에메랄드 그린 (#059669) — F005 보라색과 구분
+
+- 검증 완료:
+  - Python AST 구문 검사 모든 파일 통과 ✓
+  - F006 완전 독립 (F005 코드 미참조) ✓
+  - 데이터베이스 테이블 신규 생성 (content_jobs_f006, stages_f006) ✓
+  - API 라우팅 정상 ✓
+
+- 담당 에이전트: api-builder, pipeline-builder, web-builder
   - Ticker 추출: "삼성전자" → 005930.KS, "Tesla" → TSLA ✓
   - 차트 생성: 7개 지표별 matplotlib 다크테마 차트 생성 정상 ✓
   - 폴백 처리: yfinance/matplotlib 미설치 시 차트 건너뜀 ✓

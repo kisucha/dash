@@ -1,5 +1,5 @@
 <!-- DashboardView.vue — 메인 대시보드 페이지 (/) -->
-<!-- Ollama 연결 상태, 업무 목록(게시판), 최근 실행 이력(tasks + F001 content_jobs 통합) -->
+<!-- Ollama 연결 상태, 업무 목록(게시판), 최근 실행 이력(tasks + F001 + F005 + F006 content_jobs 통합) -->
 <!-- 작업 목록은 10초 폴링, Ollama 상태는 30초 폴링 -->
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue'
@@ -8,12 +8,14 @@ import { useTaskStore } from '../store/tasks.js'
 import { useOllamaStore } from '../store/ollama.js'
 import { useF001Store } from '../store/f001.js'
 import { useF005Store } from '../store/f005.js'
+import { useF006Store } from '../store/f006.js'
 import StatusBadge from '../components/StatusBadge.vue'
 
 const router = useRouter()
 const taskStore = useTaskStore()
 const f001Store = useF001Store()
 const f005Store = useF005Store()
+const f006Store = useF006Store()
 const ollama = useOllamaStore()
 
 // ── feature_id → feature 객체 빠른 조회용 Map ──
@@ -50,7 +52,14 @@ const recentHistory = computed(() => {
     status: j.status,
     created_at: j.created_at,
   }))
-  const merged = [...taskItems, ...f001Items, ...f005Items]
+  const f006Items = f006Store.jobs.map((j) => ({
+    _type: 'f006',
+    id: j.id,
+    featureName: 'F006 유튜브 제작(V4 채팅기반)',
+    status: j.status,
+    created_at: j.created_at,
+  }))
+  const merged = [...taskItems, ...f001Items, ...f005Items, ...f006Items]
   merged.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
   return merged.slice(0, 15)
 })
@@ -61,6 +70,8 @@ function goToHistory(item) {
     router.push({ name: 'F001JobDetail', params: { jobId: item.id } })
   } else if (item._type === 'f005') {
     router.push({ name: 'F005JobDetail', params: { jobId: item.id } })
+  } else if (item._type === 'f006') {
+    router.push({ name: 'F006JobDetail', params: { jobId: item.id } })
   } else {
     router.push({ name: 'TaskDetail', params: { id: item.id } })
   }
@@ -85,6 +96,8 @@ async function deleteHistory(item) {
       await f001Store.deleteJob(item.id)
     } else if (item._type === 'f005') {
       await f005Store.deleteJob(item.id)
+    } else if (item._type === 'f006') {
+      await f006Store.deleteJob(item.id)
     } else {
       await taskStore.deleteTaskRecord(item.id)
     }
@@ -103,6 +116,7 @@ function startPolling() {
     taskStore.fetchTasks(10)
     f001Store.fetchJobs(10)
     f005Store.fetchJobs(10)
+    f006Store.fetchJobs(10)
   }, 10000)
   ollamaTimer = setInterval(() => ollama.loadModels(), 30000)
 }
@@ -117,6 +131,7 @@ onMounted(async () => {
   taskStore.fetchTasks(10).catch(() => {})
   f001Store.fetchJobs(10).catch(() => {})
   f005Store.fetchJobs(10).catch(() => {})
+  f006Store.fetchJobs(10).catch(() => {})
   if (ollama.status === 'loading') {
     await ollama.loadModels()
   } else {
@@ -184,9 +199,11 @@ onUnmounted(() => stopPolling())
             v-for="feature in taskStore.features"
             :key="feature.feature_id"
             class="clickable-row"
-            @click="feature.feature_id === 'F005'
-              ? router.push({ name: 'F005Feature' })
-              : feature.feature_id === 'F004'
+            @click="feature.feature_id === 'F006'
+              ? router.push({ name: 'F006Feature' })
+              : feature.feature_id === 'F005'
+                ? router.push({ name: 'F005Feature' })
+                : feature.feature_id === 'F004'
                 ? router.push({ name: 'F004Feature' })
                 : feature.feature_id === 'F003'
                   ? router.push({ name: 'F003Feature' })

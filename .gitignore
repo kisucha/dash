@@ -16,6 +16,14 @@ env/
 # Node.js
 frontend/node_modules/
 frontend/dist/
+pipelines/*/remotion/node_modules/
+
+# 결과물 저장소 (로컬 생성 파일)
+storage/results/
+storage/bgm/
+
+# 외부 도구 (프로젝트 미포함)
+caveman/
 
 # SQLite DB (로컬 데이터 — 저장소에 포함 불필요)
 storage/dash.db

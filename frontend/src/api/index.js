@@ -233,3 +233,21 @@ export const approveF005Job = (jobId, finalMeta = {}) =>
 export const deleteF005Job = (jobId) => api.delete(`/api/f005/jobs/${jobId}`)
 export const rerunF005FromTTS = (jobId, payload) =>
   api.post(`/api/f005/jobs/${jobId}/rerun-from-tts`, payload)
+
+// ────────────────────────────────────────────────
+// F006 API — 유튜브 컨텐츠 제작 V4 채팅 기반 파이프라인
+// ────────────────────────────────────────────────
+export const getF006Jobs = (limit = 20, cursor = null, status = null) =>
+  api.get('/api/f006/jobs', { params: { limit, ...(cursor != null ? { cursor } : {}), ...(status ? { status } : {}) } })
+
+export const getF006Job = (jobId) => api.get(`/api/f006/jobs/${jobId}`)
+export const createF006Job = (params) => api.post('/api/f006/jobs', params)
+export const retryF006Stage = (jobId, stageId, overrideParams = null) =>
+  api.post(`/api/f006/jobs/${jobId}/stages/${stageId}/retry`, { override_params: overrideParams })
+export const rejectF006Stage = (jobId, stageId, reason, rejectionTarget = null) =>
+  api.post(`/api/f006/jobs/${jobId}/stages/${stageId}/reject`, { rejection_reason: reason, rejection_target: rejectionTarget })
+export const approveF006Job = (jobId, finalMeta = {}) =>
+  api.post(`/api/f006/jobs/${jobId}/approve`, finalMeta)
+export const deleteF006Job = (jobId) => api.delete(`/api/f006/jobs/${jobId}`)
+export const rerunF006FromTTS = (jobId, payload) =>
+  api.post(`/api/f006/jobs/${jobId}/rerun-from-tts`, payload)
