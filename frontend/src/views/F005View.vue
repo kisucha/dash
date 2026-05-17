@@ -21,7 +21,7 @@ const modalStep = ref(1)
 const topic = ref('')              // 필수 — 영상 주제
 const userContext = ref('')        // 필수 — AI 채팅에서 수집한 컨텍스트 (최소 10자)
 const channelCategory = ref('')    // 필수 — 채널 카테고리
-const channelName = ref('')        // 선택 — 채널 이름 (슬라이드 헤더 브랜딩용)
+const channelName = ref('누구나 다아는 주식 이야기')  // 채널 이름 (슬라이드 헤더 브랜딩용)
 const keywordsHint = ref('')       // 선택 — 추가 검색 키워드
 const days = ref(7)                // 보완 검색 기간 (일)
 
