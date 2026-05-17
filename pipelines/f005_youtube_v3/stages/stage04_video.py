@@ -76,6 +76,87 @@ DEFAULT_THEME = "dark_blue"
 # -- 폰트 캐시 — 동일 크기/굵기 반복 로드 방지 --
 _FONT_CACHE: dict = {}
 
+# -- 텍스트 정규화 유틸 --
+
+import re as _re
+
+def _normalize_text(text: str) -> str:
+    """슬라이드 텍스트 정규화 — 인코딩 아티팩트 제거, 특수문자 교체.
+
+    LLM이 placeholder로 삽입하는 □/■ 계열 문자를 제거하고,
+    ₩ 기호를 '원'으로 교체한다.
+    """
+    if not text:
+        return text
+    # U+25A0-U+25FF(기하 도형), U+FFFD(대체 문자), U+2610-U+2612(체크박스) 제거
+    text = _re.sub(r'[■-◿�☐☒]', '', text)
+    # ₩X원 → X원 (₩와 원 동시 존재 시 ₩만 제거)
+    text = _re.sub(r'₩([\d,]+)원', lambda m: f"{m.group(1)}원", text)
+    # ₩X → X원 (₩가 숫자 앞에 오고 원 없는 경우)
+    text = _re.sub(r'₩([\d,]+)', lambda m: f"{m.group(1)}원", text)
+    # 나머지 고립된 ₩ → 원
+    text = text.replace('₩', '원')
+    # 연속 공백 정리
+    text = _re.sub(r'  +', ' ', text).strip()
+    return text
+
+
+def _unify_amount(text: str) -> str:
+    """금액 표현을 만원 단위로 통일한다.
+
+    규칙:
+    - 10,000원 이상 → 만원 단위 (예: 260,000원 → 26만원, 2,600,000원 → 260만원)
+    - 100,000,000원 이상 → 억원 단위
+    - 'Xk원' / 'Xk' (k=천) → 만원 변환
+    - 10,000 미만 → 그대로 X원
+    """
+
+    def _to_man(m: "_re.Match") -> str:
+        raw = m.group(1).replace(',', '').replace(' ', '')
+        try:
+            n = int(raw)
+        except ValueError:
+            return m.group(0)
+        if n >= 100_000_000:
+            eok = n // 100_000_000
+            rem = (n % 100_000_000) // 10_000
+            return f"{eok}억원" if rem == 0 else f"{eok}억 {rem}만원"
+        elif n >= 10_000:
+            man = n // 10_000
+            rem = n % 10_000
+            return f"{man}만원" if rem == 0 else f"{man}만 {rem}원"
+        else:
+            return f"{n:,}원"
+
+    # 쉼표 포함 숫자 + 원 패턴 (최소 5자리 숫자부터 변환)
+    text = _re.sub(r'([\d,]{5,})원', _to_man, text)
+
+    # Xk원 패턴 (예: 260k원 → 26만원)
+    def _k_to_man(m: "_re.Match") -> str:
+        n = int(m.group(1)) * 1000
+        if n >= 10_000:
+            man = n // 10_000
+            rem = n % 10_000
+            return f"{man}만원" if rem == 0 else f"{man}만 {rem}원"
+        return f"{n:,}원"
+
+    text = _re.sub(r'(\d+)[kK]원', _k_to_man, text)
+    return text
+
+
+def _clean_slide(slide: dict) -> dict:
+    """슬라이드 딕셔너리 텍스트 필드를 정규화해 복사본을 반환한다."""
+    result = dict(slide)
+    result['title'] = _unify_amount(_normalize_text(slide.get('title', '')))
+    result['bullets'] = [
+        _unify_amount(_normalize_text(b)) for b in slide.get('bullets', [])
+    ]
+    if 'narration' in slide:
+        result['narration'] = _unify_amount(_normalize_text(slide['narration']))
+    if 'source' in slide:
+        result['source'] = _normalize_text(slide.get('source', ''))
+    return result
+
 # 한글 폰트 후보 — 절대 경로(Bold) 우선, 이후 Regular, 이후 영문 폴백
 FONT_CANDIDATES = [
     r"C:\Windows\Fonts\malgunbd.ttf",       # 맑은 고딕 Bold (절대 경로 우선)
@@ -126,11 +207,13 @@ class SlideRenderer:
     테마 딕셔너리를 주입받아 색상 일관성을 유지한다.
     """
 
-    def __init__(self, theme: dict, custom_font_path: str = ""):
+    def __init__(self, theme: dict, custom_font_path: str = "", channel_name: str = ""):
         # 테마 딕셔너리 — 색상 참조에 사용
         self.theme = theme
         # 사용자 지정 폰트 경로 — 전역 FONT_CANDIDATES 변경 없이 우선 탐색
         self._extra: list[str] = [custom_font_path] if custom_font_path else []
+        # 채널 이름 — 슬라이드 헤더 브랜딩에 표시 (미입력 시 빈 문자열)
+        self.channel_name: str = channel_name
 
     def _font(self, size: int, bold: bool = False) -> "ImageFont.FreeTypeFont":
         """self._extra를 추가해 _load_font를 호출하는 헬퍼."""
@@ -160,26 +243,37 @@ class SlideRenderer:
         draw = ImageDraw.Draw(img)
         return img, draw
 
-    def _draw_header(self, draw, title: str, page: int, total: int) -> None:
-        """헤더 영역(배경 + accent 라인 + 제목 + 페이지)을 그린다."""
+    def _draw_header(self, draw, slide_title: str, is_title_page: bool = False) -> None:
+        """헤더 영역(배경 + accent 라인 + 채널명/제목)을 그린다.
+
+        페이지 번호 없음.
+        - 타이틀 페이지: 채널명만 표시 (없으면 빈 헤더)
+        - 일반 페이지: '채널명  |  슬라이드 제목' 표시
+        """
         draw.rectangle([0, 0, W, HEADER_H], fill=self.theme["header_bg"])
         draw.rectangle([0, HEADER_H - 3, W, HEADER_H], fill=self.theme["accent"])
-        font = self._font(34, bold=True)
-        draw.text(
-            (MARGIN_X, HEADER_H // 2),
-            title[:40],
-            font=font,
-            fill=self.theme["text_primary"],
-            anchor="lm",
-        )
-        if total > 0:
-            pfont = self._font(22)
+
+        if is_title_page:
+            # 타이틀 페이지 — 채널명만 크게
+            header_text = self.channel_name
+            font = self._font(34, bold=True)
+        else:
+            # 일반 페이지 — 채널명 | 슬라이드 제목
+            if self.channel_name and slide_title:
+                header_text = f"{self.channel_name}  |  {slide_title}"
+            elif self.channel_name:
+                header_text = self.channel_name
+            else:
+                header_text = slide_title
+            font = self._font(28, bold=True)
+
+        if header_text:
             draw.text(
-                (W - MARGIN_X, HEADER_H // 2),
-                f"{page} / {total}",
-                font=pfont,
-                fill=self.theme["text_secondary"],
-                anchor="rm",
+                (MARGIN_X, HEADER_H // 2),
+                header_text[:70],
+                font=font,
+                fill=self.theme["text_primary"],
+                anchor="lm",
             )
 
     def _draw_footer(self, draw, source: str, page: int, total: int) -> None:
@@ -222,7 +316,7 @@ class SlideRenderer:
         title = slide.get("title", "")
         subtitle = slide.get("subtitle", "")
 
-        self._draw_header(draw, "유튜브 컨텐츠 제작 V3", page, total)
+        self._draw_header(draw, "", is_title_page=True)
 
         tfont = self._font(68, bold=True)
         lines = self._wrap_text(draw, title, tfont, W - MARGIN_X * 2)
@@ -259,7 +353,7 @@ class SlideRenderer:
     def render_content(self, slide: dict, page: int, total: int) -> "Image.Image":
         """일반 콘텐츠 슬라이드 렌더링."""
         img, draw = self._make_base_image()
-        self._draw_header(draw, slide.get("title", ""), page, total)
+        self._draw_header(draw, slide.get("title", ""))
         self._draw_footer(draw, slide.get("source", ""), page, total)
 
         bullets = slide.get("bullets", [])
@@ -287,7 +381,7 @@ class SlideRenderer:
     def render_summary(self, slide: dict, page: int, total: int) -> "Image.Image":
         """핵심 요약 슬라이드 렌더링."""
         img, draw = self._make_base_image()
-        self._draw_header(draw, slide.get("title", "핵심 요약"), page, total)
+        self._draw_header(draw, slide.get("title", "핵심 요약"))
 
         bullets = slide.get("bullets", [])
         nfont = self._font(50, bold=True)
@@ -329,7 +423,7 @@ class SlideRenderer:
         from PIL import Image
 
         img, draw = self._make_base_image()
-        self._draw_header(draw, slide.get("title", ""), page, total)
+        self._draw_header(draw, slide.get("title", ""))
         self._draw_footer(draw, slide.get("source", ""), page, total)
 
         # 텍스트 영역 — 좌측 60%에 bullets 렌더링
@@ -375,7 +469,7 @@ class SlideRenderer:
     def render_quote(self, slide: dict, page: int, total: int) -> "Image.Image":
         """인용/수치 슬라이드 렌더링 (type=="quote")."""
         img, draw = self._make_base_image()
-        self._draw_header(draw, slide.get("title", ""), page, total)
+        self._draw_header(draw, slide.get("title", ""))
 
         quote = slide.get(
             "quote",
@@ -453,6 +547,7 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         slides = input_data.get("slides") or input_data.get("scenes", [])
         selected_topic = input_data.get("selected_topic", "주제")
         theme_name = input_data.get("slide_theme", DEFAULT_THEME)
+        channel_name: str = input_data.get("channel_name", "") or input_data.get("channel_category", "")
 
         custom_font = input_data.get("slide_font_path", "")
         if custom_font:
@@ -466,7 +561,7 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         theme = SLIDE_THEMES.get(theme_name, SLIDE_THEMES[DEFAULT_THEME])
-        renderer = SlideRenderer(theme=theme, custom_font_path=custom_font)
+        renderer = SlideRenderer(theme=theme, custom_font_path=custom_font, channel_name=channel_name)
         total = len(slides)
         clips: list[dict] = []
 
@@ -480,7 +575,6 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         from pipelines.f005_youtube_v3.stages.chart_generator import (
             extract_ticker, detect_indicators, ChartGenerator
         )
-        from pipelines.f005_youtube_v3.stages.image_fetcher import fetch_slide_image
 
         user_context = input_data.get("user_context", "")
         ticker = extract_ticker(selected_topic, user_context)
@@ -495,29 +589,28 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         chart_dir.mkdir(parents=True, exist_ok=True)
         chart_gen = ChartGenerator(theme_colors=theme)
 
-        # 이미지 인프라 — 채널 카테고리 있을 때만 준비
-        use_image_fetcher = bool(channel_category)
-        if use_image_fetcher:
-            img_dir = output_dir.parent / "bg_images"
-            img_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            img_dir = None
+        # 이미지 fetcher 제거 — 지표 차트만 허용 (카테고리 랜덤 이미지 사용 안 함)
 
         logger.info(
             f"[F005][STAGE_04][job_id={job_id}] "
             f"ticker={ticker or '없음'} effective={effective_ticker} "
-            f"category={channel_category or '없음'}"
+            f"channel_name={channel_name or '없음'}"
         )
+
+        # 슬라이드 텍스트 정규화 — □ 제거, ₩→원, 금액 만원 단위 통일
+        slides = [_clean_slide(s) for s in slides]
 
         for slide in slides:
             slide_no: int = slide.get("slide_no", len(clips) + 1)
             slide_type: str = slide.get("type", "content")
+            is_last_slide: bool = (slide_no == len(slides))
             out_path = str(output_dir / f"slide_{slide_no:02d}.png")
 
             try:
-                # 우측 패널 이미지 경로 — content/summary 타입에서만 시도
+                # 우측 패널 차트 — content 타입 + 금융 지표 감지 시에만 생성
+                # summary(핵심요약) 또는 마지막 슬라이드는 차트 없음
                 chart_path = None
-                if slide_type in ("content", "summary"):
+                if slide_type == "content" and not is_last_slide:
                     slide_text = (
                         slide.get("title", "")
                         + " "
@@ -526,8 +619,7 @@ class Stage04VideoGen(BaseStage, BasePipeline):
                     indicators = detect_indicators(slide_text)
 
                     if indicators:
-                        # 슬라이드 텍스트에 금융 지표 키워드 감지 → 차트 우선
-                        # 티커 없으면 ^KS11(KOSPI) 기본값 사용
+                        # 금융 지표 키워드 감지 → 차트 생성 (티커 없으면 ^KS11 기본값)
                         chart_out = str(chart_dir / f"chart_{slide_no:02d}.png")
                         ok = chart_gen.generate(
                             ticker=effective_ticker,
@@ -542,17 +634,7 @@ class Stage04VideoGen(BaseStage, BasePipeline):
                                 f"[F005][STAGE_04][job_id={job_id}] "
                                 f"슬라이드 {slide_no}: 지표={indicators} 차트 생성"
                             )
-                    elif use_image_fetcher:
-                        # 지표 없음 + 채널 카테고리 있음 → 카테고리 이미지
-                        img_out = str(img_dir / f"bg_{slide_no:02d}.png")
-                        ok = fetch_slide_image(
-                            channel_category=channel_category,
-                            slide_index=slide_no - 1,
-                            output_path=img_out,
-                            size=(CHART_PANEL_W, CHART_PANEL_H),
-                        )
-                        if ok:
-                            chart_path = img_out
+                    # 지표 없으면 → 차트/이미지 없이 텍스트 전용 레이아웃
 
                 if slide_type == "title":
                     img = renderer.render_title(slide, page=slide_no, total=total)

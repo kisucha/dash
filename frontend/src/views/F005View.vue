@@ -20,7 +20,8 @@ const modalStep = ref(1)
 // ── 모달 Step 1: 주제 및 배경 정보 ──
 const topic = ref('')              // 필수 — 영상 주제
 const userContext = ref('')        // 필수 — AI 채팅에서 수집한 컨텍스트 (최소 10자)
-const channelCategory = ref('')    // 선택 — 채널 카테고리 (미입력 시 topic으로 대체)
+const channelCategory = ref('')    // 필수 — 채널 카테고리
+const channelName = ref('')        // 선택 — 채널 이름 (슬라이드 헤더 브랜딩용)
 const keywordsHint = ref('')       // 선택 — 추가 검색 키워드
 const days = ref(7)                // 보완 검색 기간 (일)
 
@@ -162,6 +163,7 @@ async function submitCreateJob() {
   formError.value = ''
   const params = {
     channel_category: channelCategory.value.trim(),
+    ...(channelName.value.trim() ? { channel_name: channelName.value.trim() } : {}),
     topic: topic.value.trim(),
     user_context: userContext.value.trim(),
     ...(keywordsHint.value.trim() ? { keywords_hint: keywordsHint.value.trim() } : {}),
@@ -345,16 +347,30 @@ onMounted(async () => {
             <span v-if="chatContextHint" class="chat-import-hint">{{ chatContextHint }}</span>
           </div>
 
-          <!-- 채널 카테고리 (필수) -->
-          <div class="form-item required-item">
-            <label class="form-label">채널 카테고리 <span class="required-mark">*</span></label>
-            <input
-              type="text"
-              v-model="channelCategory"
-              class="form-input"
-              placeholder="예: IT/기술, 금융/재테크, 건강/운동"
-            />
-            <p class="field-hint">콘텐츠 발굴 및 스크립트 방향에 사용됩니다.</p>
+          <div class="form-grid">
+            <!-- 채널 카테고리 (필수) -->
+            <div class="form-item">
+              <label class="form-label">채널 카테고리 <span class="required-mark">*</span></label>
+              <input
+                type="text"
+                v-model="channelCategory"
+                class="form-input"
+                placeholder="예: IT/기술, 금융/재테크, 건강/운동"
+              />
+              <p class="field-hint">스크립트 방향 및 이미지 선택에 사용됩니다.</p>
+            </div>
+
+            <!-- 채널 이름 (선택 — 슬라이드 헤더 브랜딩) -->
+            <div class="form-item">
+              <label class="form-label">채널 이름 <span class="optional-mark">(선택)</span></label>
+              <input
+                type="text"
+                v-model="channelName"
+                class="form-input"
+                placeholder="예: 누구나 다아는 주식 이야기"
+              />
+              <p class="field-hint">슬라이드 헤더에 표시될 채널 브랜드명입니다.</p>
+            </div>
           </div>
 
           <!-- 주제 (필수, min 2자) -->
@@ -550,6 +566,10 @@ onMounted(async () => {
             <div class="summary-row">
               <span>채널 카테고리</span>
               <strong>{{ channelCategory || '-' }}</strong>
+            </div>
+            <div class="summary-row" v-if="channelName">
+              <span>채널 이름</span>
+              <strong>{{ channelName }}</strong>
             </div>
             <div class="summary-row">
               <span>주제</span>

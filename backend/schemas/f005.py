@@ -20,6 +20,8 @@ class F005JobCreateRequest(BaseModel):
 
     # 채널 카테고리 (스크립트 톤/방향 결정에 사용 — 예: IT/기술, 경제/재테크)
     channel_category: str = Field(..., min_length=1, max_length=100, description="채널 카테고리")
+    # 채널 이름 (슬라이드 헤더 브랜딩용 — 예: 누구나 다아는 주식 이야기)
+    channel_name: Optional[str] = Field(default=None, max_length=100, description="채널 이름 (슬라이드 헤더용)")
     # 영상 주제 — AI 채팅에서 확인한 주제 (필수)
     topic: str = Field(..., min_length=2, max_length=200, description="영상 주제 — 채팅에서 확인한 주제")
     # 채팅에서 수집한 정보/메모 (필수)
