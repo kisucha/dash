@@ -28,6 +28,13 @@ HEADER_H = 90
 CONTENT_Y = HEADER_H + 20
 FOOTER_H = 60
 
+# -- 차트 패널 레이아웃 상수 --
+CHART_PANEL_X = 768          # 텍스트 영역 끝 (W * 0.6)
+CHART_PANEL_W = 492          # 차트 패널 너비 (W - CHART_PANEL_X - 20)
+CHART_PANEL_Y = HEADER_H + 10
+CHART_PANEL_H = 540          # H - HEADER_H - FOOTER_H - 10
+TEXT_AREA_W = CHART_PANEL_X - MARGIN_X - 20  # 차트 있을 때 텍스트 영역 너비
+
 # -- 색상 테마 --
 SLIDE_THEMES = {
     "dark_blue": {
@@ -308,6 +315,63 @@ class SlideRenderer:
 
         return img
 
+    def render_content_with_chart(
+        self,
+        slide: dict,
+        chart_img_path: str,
+        page: int,
+        total: int,
+    ) -> "Image.Image":
+        """텍스트(좌 60%) + 차트 이미지(우 40%) 레이아웃 슬라이드 렌더링.
+
+        차트 이미지 로드 실패 시 render_content 폴백.
+        """
+        from PIL import Image
+
+        img, draw = self._make_base_image()
+        self._draw_header(draw, slide.get("title", ""), page, total)
+        self._draw_footer(draw, slide.get("source", ""), page, total)
+
+        # 텍스트 영역 — 좌측 60%에 bullets 렌더링
+        bullets = slide.get("bullets", [])
+        bfont = self._font(30)
+        footer_y = H - FOOTER_H
+        avail_h = footer_y - CONTENT_Y - 10
+        spacing = min(90, avail_h // max(1, len(bullets)))
+        y = CONTENT_Y + 15
+
+        for bullet in bullets[:5]:
+            draw.ellipse(
+                [MARGIN_X, y + 12, MARGIN_X + 12, y + 24],
+                fill=self.theme["bullet_dot"],
+            )
+            lines = self._wrap_text(draw, bullet, bfont, TEXT_AREA_W - 25)
+            for i, line in enumerate(lines[:2]):
+                color = (
+                    self.theme["text_primary"] if i == 0 else self.theme["text_secondary"]
+                )
+                draw.text((MARGIN_X + 22, y + i * 35), line, font=bfont, fill=color)
+            y += spacing
+
+        # 구분선 — 텍스트/차트 경계
+        draw.rectangle(
+            [CHART_PANEL_X, HEADER_H, CHART_PANEL_X + 1, H - FOOTER_H],
+            fill=self.theme["divider"],
+        )
+
+        # 차트 이미지 붙이기
+        try:
+            chart_img = Image.open(chart_img_path).convert("RGB")
+            chart_img = chart_img.resize(
+                (CHART_PANEL_W, CHART_PANEL_H), Image.LANCZOS
+            )
+            img.paste(chart_img, (CHART_PANEL_X + 10, CHART_PANEL_Y))
+        except Exception as e:
+            logger.warning(f"[SlideRenderer] 차트 이미지 로드 실패 — 폴백: {e}")
+            return self.render_content(slide, page, total)
+
+        return img
+
     def render_quote(self, slide: dict, page: int, total: int) -> "Image.Image":
         """인용/수치 슬라이드 렌더링 (type=="quote")."""
         img, draw = self._make_base_image()
@@ -406,14 +470,54 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         total = len(slides)
         clips: list[dict] = []
 
+        # 차트 생성기 초기화 — 티커 추출 실패 시 chart_gen=None으로 건너뜀
+        from pipelines.f005_youtube_v3.stages.chart_generator import (
+            extract_ticker, detect_indicators, ChartGenerator
+        )
+        user_context = input_data.get("user_context", "")
+        ticker = extract_ticker(selected_topic, user_context)
+        if ticker:
+            logger.info(f"[F005][STAGE_04][job_id={job_id}] 감지된 티커: {ticker}")
+            chart_dir = output_dir.parent / "charts"
+            chart_dir.mkdir(parents=True, exist_ok=True)
+            chart_gen = ChartGenerator(theme_colors=theme)
+        else:
+            logger.info(f"[F005][STAGE_04][job_id={job_id}] 티커 감지 실패 — 차트 없이 진행")
+            chart_gen = None
+            chart_dir = None
+
         for slide in slides:
             slide_no: int = slide.get("slide_no", len(clips) + 1)
             slide_type: str = slide.get("type", "content")
             out_path = str(output_dir / f"slide_{slide_no:02d}.png")
 
             try:
+                # 차트 생성 시도 — content/summary 타입이고 티커가 있을 때만
+                chart_path = None
+                if ticker and chart_gen and slide_type in ("content", "summary"):
+                    slide_text = (
+                        slide.get("title", "")
+                        + " "
+                        + " ".join(slide.get("bullets", []))
+                    )
+                    indicators = detect_indicators(slide_text)
+                    chart_out = str(chart_dir / f"chart_{slide_no:02d}.png")
+                    ok = chart_gen.generate(
+                        ticker=ticker,
+                        indicators=indicators,
+                        output_path=chart_out,
+                        period="3mo",
+                        chart_size=(CHART_PANEL_W, CHART_PANEL_H),
+                    )
+                    if ok:
+                        chart_path = chart_out
+
                 if slide_type == "title":
                     img = renderer.render_title(slide, page=slide_no, total=total)
+                elif chart_path:
+                    img = renderer.render_content_with_chart(
+                        slide, chart_path, page=slide_no, total=total
+                    )
                 elif slide_type == "summary":
                     img = renderer.render_summary(slide, page=slide_no, total=total)
                 elif slide_type == "quote":
