@@ -194,12 +194,14 @@ class Stage05rRemotion(BaseStage, BasePipeline):
                 clip_durations[c["file_path"]] = float(c.get("duration_sec", 5))
 
         # ----------------------------------------------------------------
-        # 4. SRT 파싱 - srt_file_path가 있으면 파싱, 없으면 빈 목록
+        # 4. SRT 파싱 - subtitle_enabled=False이면 자막 건너뜀
         # ----------------------------------------------------------------
+        subtitle_enabled: bool = bool(input_data.get("subtitle_enabled", True))
         srt_entries: list[dict] = []
         has_subtitles: bool = False
         subtitle_file_path: Optional[str] = None
-        if srt_file_path and Path(srt_file_path).exists():
+
+        if subtitle_enabled and srt_file_path and Path(srt_file_path).exists():
             srt_entries = self._parse_srt(srt_file_path)
             if srt_entries:
                 has_subtitles = True
@@ -208,6 +210,8 @@ class Stage05rRemotion(BaseStage, BasePipeline):
                     f"[F006][STAGE_05R][job_id={job_id}] SRT 파싱 완료 - "
                     f"{len(srt_entries)}개 항목"
                 )
+        elif not subtitle_enabled:
+            logger.info(f"[F006][STAGE_05R][job_id={job_id}] 자막 비활성화 - SRT 건너뜀")
 
         # ----------------------------------------------------------------
         # 5. remotion_props.json 구성 및 저장

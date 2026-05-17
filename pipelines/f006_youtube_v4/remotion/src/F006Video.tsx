@@ -152,19 +152,18 @@ const SlideRenderer: React.FC<SlideRendererProps> = ({
 };
 
 // ── 자막 오버레이 ────────────────────────────────────────────────
+// currentSec는 상위(F006Video)에서 전역 프레임 기반으로 직접 계산해 전달
+// Sequence 내부 로컬 프레임을 사용하지 않으므로 오디오 타임라인과 정확히 동기화됨
 
 interface SubtitleOverlayProps {
   srtEntries: SRTEntry[];
-  timelineOffsetSec: number;
+  currentSec: number;  // 상위에서 globalFrame / fps로 계산해 전달
 }
 
 const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   srtEntries,
-  timelineOffsetSec,
+  currentSec,
 }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const currentSec = timelineOffsetSec + frame / fps;
 
   const activeEntry = srtEntries.find(
     (e) => e.start_sec <= currentSec && currentSec < e.end_sec
@@ -226,6 +225,10 @@ export const F006Video: React.FC<F006VideoProps> = ({
   transition_mode,
 }) => {
   const { fps } = useVideoConfig();
+  // 전역 프레임 — Audio 트랙과 동일한 타임라인 기준
+  const globalFrame = useCurrentFrame();
+  const globalCurrentSec = globalFrame / fps;
+
   // theme 변수는 현재 SlideRenderer에 전달되지 않지만 테마 확장을 위해 선언 유지
   void theme;
 
@@ -235,16 +238,6 @@ export const F006Video: React.FC<F006VideoProps> = ({
 
   // 각 슬라이드의 durationInFrames 계산
   const slideDurationFrames = slides.map((s) => Math.ceil(s.duration_sec * fps));
-
-  // 슬라이드별 타임라인 시작 시간(초) 계산 - 자막 동기화용
-  // TransitionSeries는 전환 구간이 겹치므로 실제 시작 오프셋 = 이전 슬라이드들의 합 - 겹친 전환 구간
-  const slideStartSecs: number[] = [];
-  let accFrames = 0;
-  for (let i = 0; i < slides.length; i++) {
-    slideStartSecs.push(accFrames / fps);
-    accFrames += slideDurationFrames[i];
-    if (i < slides.length - 1) accFrames -= TRANSITION_FRAMES; // 전환 오버랩
-  }
 
   return (
     <AbsoluteFill style={{ background: "#000" }}>
@@ -270,10 +263,6 @@ export const F006Video: React.FC<F006VideoProps> = ({
                     slideType={slideItem.type}
                     durationInFrames={slideDurationFrames[i]}
                   />
-                  <SubtitleOverlay
-                    srtEntries={srt_entries}
-                    timelineOffsetSec={slideStartSecs[i]}
-                  />
                 </AbsoluteFill>
               </TransitionSeries.Sequence>
 
@@ -288,6 +277,14 @@ export const F006Video: React.FC<F006VideoProps> = ({
           );
         })}
       </TransitionSeries>
+
+      {/* 자막 오버레이 — TransitionSeries 바깥, 전역 currentSec 사용으로 오디오와 정확히 동기화 */}
+      {srt_entries.length > 0 && (
+        <SubtitleOverlay
+          srtEntries={srt_entries}
+          currentSec={globalCurrentSec}
+        />
+      )}
     </AbsoluteFill>
   );
 };

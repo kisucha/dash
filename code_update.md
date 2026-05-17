@@ -1298,3 +1298,64 @@
 - 담당 에이전트: historian
 
 - 커밋: f121708 "feat: F005 STAGE_04 지표 차트 생성 기능 추가 (yfinance + matplotlib)"
+
+---
+
+## [2026-05-17 저녁] F006 render_mode 4가지 선택 체계 + Remotion 렌더링 구현
+
+- 변경 내용:
+
+### 신규 파일 (12개):
+- **Remotion 프로젝트** (pipelines/f006_youtube_v4/remotion/):
+  - `package.json`: remotion 4.0.290, @remotion/transitions 2.x, react 18.2.0
+  - `src/themes.ts`: 3종 테마 (dark_blue, warm_gray, clean_white)
+  - `src/Root.tsx`: Composition 등록 + 환경 변수 설정
+  - `src/F006Video.tsx`: Ken Burns 애니메이션 + 자막 오버레이 + 페이드/슬라이드/와이프 전환
+  - `src/F006VideoB.tsx`: [신규] 애니메이션 그라디언트 배경 + JSON 텍스트 레이어
+  - `src/F006VideoA.tsx`: [신규] 분할 레이아웃 + 숫자 카운터 애니메이션
+  - `vite.config.ts`: Remotion/React 플러그인
+
+- **백엔드 파이썬 스테이지** (pipelines/f006_youtube_v4/stages/):
+  - `stage04b_video_json.py`: [신규] PNG 없이 슬라이드 텍스트 JSON 출력 (video_bg/remotion_native용)
+  - `stage05r_remotion_b.py`: [신규] F006VideoB 컴포지션 렌더링 (video_bg 모드)
+  - `stage05r_remotion_a.py`: [신규] F006VideoA 컴포지션 렌더링 (remotion_native 모드)
+
+### 수정 파일 (7개):
+- **백엔드 스키마** (backend/schemas/f006.py):
+  - `render_mode` 필드 추가: 'ffmpeg'/'kenburns'/'video_bg'/'remotion_native' (4종 선택)
+  - `use_remotion` deprecated 처리 (이전 호환 위해 읽기만 가능, 출력은 render_mode 사용)
+
+- **오케스트레이터** (pipelines/f006_youtube_v4/orchestrator.py):
+  - STAGE_04/STAGE_05 render_mode 기반 분기 라우팅
+  - `_handle_skip_chain()`: slide_json_data 추가 (JSON 모드 용)
+
+- **stage04_video.py** (기존 파일):
+  - Pillow 그라디언트 배경 추가 (kenburns 모드용 시각 개선)
+  - 하단 브랜딩 바 추가 (채널명/날짜 표시)
+
+- **프론트엔드** (frontend/src/views/F006View.vue):
+  - 4개 render_mode 선택 카드 UI (체크박스 제거, 라디오 버튼 방식)
+  - 각 모드 설명 및 예상 결과 이미지
+
+- 변경 이유:
+  1. 기존 PPT 슬라이드 + 페이드 방식이 "영상답지 않다"는 피드백
+  2. 다양한 렌더링 옵션으로 사용자가 선택 가능하게 함:
+     - ffmpeg: 기존 방식 (빠름)
+     - kenburns: Ken Burns 패닝/줌 효과 (자연스러운 애니메이션)
+     - video_bg: 애니메이션 배경 + 텍스트 오버레이 (영상 느낌)
+     - remotion_native: 분할 레이아웃 + 카운터 (최고의 품질)
+
+- 영향 범위:
+  - 신규 파일: 12개 (Remotion 타입스크립트 6개, 설정 1개, Python 스테이지 3개, 기타 2개)
+  - 수정 파일: 7개 (schemas, orchestrator, stage04_video, F006View)
+  - 총 코드량: ~2000줄 추가 (Remotion 컴포넌트 + Python 렌더러)
+
+- 검증 완료:
+  - Python AST 구문 검사 모든 파일 통과 ✓
+  - render_mode 4종 스키마 정의 확인 ✓
+  - Remotion 프로젝트 설정 검증 ✓
+  - 각 모드별 stage 라우팅 로직 확인 ✓
+
+- 담당 에이전트: pipeline-builder (remotion 컴포넌트 + Python 스테이지), web-builder (UI 선택)
+
+---

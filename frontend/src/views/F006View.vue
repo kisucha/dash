@@ -87,6 +87,9 @@ const renderMode = ref('ffmpeg')
 const remotionTheme = ref('dark_blue')      // kenburns/video_bg/remotion_native 전용
 const remotionTransition = ref('auto')      // kenburns 전용
 
+// ── 자막 설정 ──
+const subtitleEnabled = ref(true)   // 자막 생성 및 영상 포함 여부 (false 시 자막 없이 영상만 생성)
+
 // ── 모달 Step 4: 업로드 설정 ──
 const uploadMode = ref('manual_approval')    // 업로드 모드 (manual_approval / auto)
 const privacy = ref('private')      // 공개 범위
@@ -189,6 +192,7 @@ async function submitCreateJob() {
     upload_mode: uploadMode.value,
     privacy: privacy.value,
     render_mode: renderMode.value,
+    subtitle_enabled: subtitleEnabled.value,
     // Remotion 모드 하위 호환 — 백엔드 기존 use_remotion 필드 지원
     // cardnews는 FFmpeg 사용이므로 Remotion 미포함
     use_remotion: ['kenburns', 'video_bg', 'remotion_native'].includes(renderMode.value),
@@ -550,6 +554,20 @@ onMounted(async () => {
             </div>
           </div>
 
+          <!-- 자막 설정 -->
+          <div class="section-divider">
+            <span class="section-divider-label">자막 설정</span>
+          </div>
+
+          <div class="form-item">
+            <label class="form-label">자막</label>
+            <label class="checkbox-label">
+              <input type="checkbox" v-model="subtitleEnabled" />
+              <span>자막 생성 및 포함</span>
+            </label>
+            <p class="field-hint">체크 해제 시 자막 없이 영상만 생성합니다.</p>
+          </div>
+
           <!-- 렌더링 모드 선택 -->
           <div class="render-mode-section">
             <div class="section-divider">
@@ -718,6 +736,10 @@ onMounted(async () => {
             <div class="summary-row" v-if="renderMode !== 'ffmpeg'">
               <span>테마</span>
               <strong>{{ remotionTheme }}</strong>
+            </div>
+            <div class="summary-row">
+              <span>자막</span>
+              <strong>{{ subtitleEnabled ? '포함' : '없음' }}</strong>
             </div>
             <div class="summary-row">
               <span>업로드 모드 / 공개</span>

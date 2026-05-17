@@ -521,6 +521,8 @@ class F006Orchestrator(BasePipeline):
                 "tts_rate": initial_params.get("tts_rate") or "+0%",
                 "tts_pitch": initial_params.get("tts_pitch") or "+0Hz",
                 "tts_skip": initial_params.get("tts_skip", False),
+                # 자막 생성 여부 전달
+                "subtitle_enabled": initial_params.get("subtitle_enabled", True),
             }
 
         if stage_id == "STAGE_04_VIDEO_GEN":
@@ -553,6 +555,8 @@ class F006Orchestrator(BasePipeline):
                 "remotion_theme": initial_params.get("remotion_theme", "dark_blue"),
                 "remotion_transition": initial_params.get("remotion_transition", "auto"),
                 "remotion_concurrency": initial_params.get("remotion_concurrency", 4),
+                # 자막 생성 여부 전달
+                "subtitle_enabled": initial_params.get("subtitle_enabled", True),
             })
             return result
 

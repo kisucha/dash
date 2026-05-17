@@ -38,10 +38,14 @@ class Stage03TTS(BaseStage, BasePipeline):
       - openai: OpenAI TTS API (OPENAI_API_KEY 환경변수 필요)
 
     tts_skip=True이면 보이스오버 없이 다음 스테이지로 진행한다.
+    edge_tts 사용 시 SubMaker로 정확한 WordBoundary 기반 SRT를 생성한다.
     """
 
     STAGE_ID: str = "STAGE_03_TTS"
     STAGE_ORDER: int = 3
+
+    # edge_tts SubMaker가 생성한 SRT 경로 (execute 중 _run_edge_tts가 설정)
+    _edge_tts_srt_path: Optional[str] = None
 
     def get_metadata(self) -> dict:
         """BasePipeline 추상 메서드 충족용."""
@@ -109,6 +113,9 @@ class Stage03TTS(BaseStage, BasePipeline):
             f"프로바이더: {provider}, 출력: {output_path}"
         )
 
+        # SubMaker SRT 경로 초기화 (execute 실행마다 리셋)
+        self._edge_tts_srt_path = None
+
         # 프로바이더별 TTS 실행
         try:
             if provider == "coqui":
@@ -138,28 +145,60 @@ class Stage03TTS(BaseStage, BasePipeline):
         if not output_file.exists():
             raise RuntimeError(f"TTS 출력 파일이 생성되지 않음: {output_path}")
 
-        # 오디오 길이 추정 (파일 크기 기반 - 실제 duration은 ffprobe로 정확히 계산 가능)
+        # 파일 크기 (폴백 추정용으로 유지)
         file_size_bytes: int = output_file.stat().st_size
         file_size_kb: int = file_size_bytes // 1024
-        # mp3 128kbps 기준 추정: bytes / (128 * 1024 / 8)
-        audio_duration: float = round(file_size_bytes / 16000, 1)
+        # mp3 128kbps 기준 파일 크기 추정값 (ffprobe 폴백용)
+        audio_duration_estimate: float = round(file_size_bytes / 16000, 1)
 
-        logger.info(
-            f"[F006][STAGE_03][job_id={job_id}] TTS 완료 - "
-            f"{file_size_kb}KB, 추정 {audio_duration}초"
-        )
+        # ffprobe로 실제 오디오 길이 측정 (더 정확)
+        actual_duration: Optional[float] = self._get_actual_audio_duration(output_path)
+        audio_duration: float = actual_duration if actual_duration else audio_duration_estimate
 
-        # SRT 자막 파일 생성 - TTS 성공 시 항상 생성
+        if actual_duration:
+            logger.info(
+                f"[F006][STAGE_03][job_id={job_id}] TTS 완료 - "
+                f"{file_size_kb}KB, ffprobe 실제 길이: {actual_duration:.2f}초"
+            )
+        else:
+            logger.info(
+                f"[F006][STAGE_03][job_id={job_id}] TTS 완료 - "
+                f"{file_size_kb}KB, 파일 크기 추정: {audio_duration_estimate:.1f}초 (ffprobe 실패)"
+            )
+
+        # SRT 자막 파일 결정
+        # subtitle_enabled=False이면 자막 생성 건너뜀
+        subtitle_enabled: bool = bool(input_data.get("subtitle_enabled", True))
         output_dir: str = str(Path(output_path).parent)
         srt_file_path: Optional[str] = None
         srt_content: str = ""
-        try:
-            srt_file_path, srt_content = self._generate_srt(
-                script_text, audio_duration, output_dir, job_id
-            )
-        except Exception as e:
-            # SRT 생성 실패는 경고만 - TTS 성공 자체는 유지
-            logger.warning(f"[F006][STAGE_03][job_id={job_id}] SRT 생성 실패 (무시): {e}")
+
+        if subtitle_enabled:
+            # edge_tts SubMaker SRT 우선 사용 (WordBoundary 기반, 정확한 타임코드)
+            if (
+                provider == "edge_tts"
+                and self._edge_tts_srt_path
+                and Path(self._edge_tts_srt_path).exists()
+            ):
+                srt_file_path = self._edge_tts_srt_path
+                try:
+                    srt_content = Path(srt_file_path).read_text(encoding="utf-8")
+                except Exception as e:
+                    logger.warning(f"[F006][STAGE_03][job_id={job_id}] SubMaker SRT 읽기 실패: {e}")
+                    srt_content = ""
+                logger.info(
+                    f"[F006][STAGE_03][job_id={job_id}] SubMaker SRT 사용 (정확한 타임코드)"
+                )
+            else:
+                # 다른 프로바이더: ffprobe 실제 duration 기반 char 비례 SRT
+                try:
+                    srt_file_path, srt_content = self._generate_srt(
+                        script_text, audio_duration, output_dir, job_id
+                    )
+                except Exception as e:
+                    logger.warning(f"[F006][STAGE_03][job_id={job_id}] SRT 생성 실패 (무시): {e}")
+        else:
+            logger.info(f"[F006][STAGE_03][job_id={job_id}] 자막 비활성화 - SRT 생성 건너뜀")
 
         return {
             "stage_id": "STAGE_03_TTS",
@@ -212,6 +251,50 @@ class Stage03TTS(BaseStage, BasePipeline):
 
         logger.info(f"[F006][STAGE_03][job_id={job_id}] Coqui TTS 완료")
 
+    def _get_actual_audio_duration(self, audio_path: str) -> Optional[float]:
+        """ffprobe로 실제 오디오 길이(초)를 측정한다. 실패 시 None 반환.
+
+        시스템 ffprobe 먼저 시도, 없으면 imageio_ffmpeg 번들 경로로 폴백.
+        """
+        # 시스템 PATH의 ffprobe 시도
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe", "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    audio_path,
+                ],
+                capture_output=True, text=True, timeout=30, encoding="utf-8"
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+        except Exception:
+            pass
+
+        # imageio_ffmpeg 번들 ffprobe 경로 시도
+        try:
+            import imageio_ffmpeg as _ff
+            ffmpeg_exe = _ff.get_ffmpeg_exe()
+            ffprobe_path = (
+                ffmpeg_exe.replace("ffmpeg.exe", "ffprobe.exe").replace("ffmpeg", "ffprobe")
+            )
+            result = subprocess.run(
+                [
+                    ffprobe_path, "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    audio_path,
+                ],
+                capture_output=True, text=True, timeout=30, encoding="utf-8"
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return float(result.stdout.strip())
+        except Exception:
+            pass
+
+        return None
+
     def _run_edge_tts(
         self,
         script_text: str,
@@ -221,12 +304,11 @@ class Stage03TTS(BaseStage, BasePipeline):
         rate: str = "+0%",
         pitch: str = "+0Hz",
     ) -> None:
-        """Microsoft Edge TTS 실행 (edge-tts 패키지 사용, 무료, API 키 불필요)."""
-        _voice = voice or "ko-KR-SunHiNeural"
-        logger.info(
-            f"[F006][STAGE_03][job_id={job_id}] Edge TTS 실행 시작 - "
-            f"voice={_voice}, rate={rate}, pitch={pitch}"
-        )
+        """edge_tts + SubMaker: 음성 파일과 정확한 SRT 자막을 동시 생성.
+
+        SubMaker는 WordBoundary 이벤트를 캡처해 단어 단위 타임코드를 만든다.
+        SRT 저장 경로는 self._edge_tts_srt_path에 기록해 execute()에서 참조한다.
+        """
         try:
             import asyncio
             import edge_tts  # type: ignore[import]
@@ -236,20 +318,112 @@ class Stage03TTS(BaseStage, BasePipeline):
                 f"pip install edge-tts 실행 후 재시도하세요. ({e})"
             ) from e
 
-        async def _synthesize() -> None:
+        _voice = voice or "ko-KR-SunHiNeural"
+        srt_path = str(Path(output_path).parent / "voiceover.srt")
+
+        logger.info(
+            f"[F006][STAGE_03][job_id={job_id}] Edge TTS+SubMaker 실행 시작 - "
+            f"voice={_voice}, rate={rate}, pitch={pitch}"
+        )
+
+        async def _synthesize():
+            """스트리밍으로 오디오 저장 + WordBoundary 수집."""
+            subs = edge_tts.SubMaker()
             communicate = edge_tts.Communicate(
                 text=script_text[:5000],
                 voice=_voice,
                 rate=rate,
                 pitch=pitch,
             )
-            await communicate.save(output_path)
+            with open(output_path, "wb") as f:
+                async for chunk in communicate.stream():
+                    if chunk["type"] == "audio":
+                        f.write(chunk["data"])
+                    elif chunk["type"] == "WordBoundary":
+                        subs.create_sub(
+                            chunk["offset"], chunk["duration"], chunk["text"]
+                        )
+            return subs
 
         try:
-            asyncio.run(_synthesize())
-            logger.info(f"[F006][STAGE_03][job_id={job_id}] Edge TTS 완료")
+            subs = asyncio.run(_synthesize())
+            self._save_submaker_srt(subs, srt_path, job_id)
+            self._edge_tts_srt_path = srt_path
+            logger.info(f"[F006][STAGE_03][job_id={job_id}] Edge TTS+SubMaker 완료")
         except Exception as e:
+            self._edge_tts_srt_path = None
             raise RuntimeError(f"Edge TTS 실행 실패: {e}") from e
+
+    def _save_submaker_srt(self, subs, srt_path: str, job_id: int) -> None:
+        """SubMaker 출력을 SRT 형식으로 변환 저장.
+
+        edge_tts.SubMaker.generate_subs()는 VTT 형식을 반환한다.
+        타임코드 구분자를 콤마로 바꾸고 인덱스를 붙여 SRT로 저장한다.
+        """
+        import re as _re
+
+        # generate_subs() 반환은 VTT 형식 (WEBVTT\n\n타임코드\n텍스트...)
+        vtt_content = ""
+        try:
+            vtt_content = subs.generate_subs()
+        except Exception:
+            # 구버전 edge_tts: words_in_cue 파라미터 지원
+            try:
+                vtt_content = subs.generate_subs(words_in_cue=10)
+            except Exception as e:
+                logger.warning(
+                    f"[F006][STAGE_03][job_id={job_id}] SubMaker generate_subs 실패: {e}"
+                )
+                return
+
+        if not vtt_content:
+            logger.warning(
+                f"[F006][STAGE_03][job_id={job_id}] SubMaker 빈 VTT 출력 - SRT 저장 건너뜀"
+            )
+            return
+
+        lines = vtt_content.strip().splitlines()
+        srt_lines: list[str] = []
+        idx = 1
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            # WEBVTT 헤더 및 빈 줄, NOTE 블록 건너뜀
+            if line in ("WEBVTT", "") or line.startswith("NOTE"):
+                i += 1
+                continue
+            # 타임코드 라인 (00:00:00.000 --> 00:00:01.000)
+            tc_match = _re.match(
+                r"(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})",
+                line
+            )
+            if tc_match:
+                # 점(.) -> 콤마(,) 변환 (SRT 형식)
+                start = tc_match.group(1).replace(".", ",")
+                end = tc_match.group(2).replace(".", ",")
+                i += 1
+                text_parts: list[str] = []
+                while i < len(lines) and lines[i].strip():
+                    text_parts.append(lines[i].strip())
+                    i += 1
+                if text_parts:
+                    srt_lines.extend([
+                        str(idx),
+                        f"{start} --> {end}",
+                        " ".join(text_parts),
+                        "",
+                    ])
+                    idx += 1
+            else:
+                i += 1
+
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(srt_lines))
+
+        logger.info(
+            f"[F006][STAGE_03][job_id={job_id}] SubMaker SRT 저장 완료: "
+            f"{srt_path} ({idx - 1}개 항목)"
+        )
 
     def _run_gtts(self, script_text: str, output_path: str, job_id: int) -> None:
         """Google TTS 실행 (gTTS 패키지, 무료, API 키 불필요)."""

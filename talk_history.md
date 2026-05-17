@@ -1063,3 +1063,89 @@
 <!-- session-end: 2026-05-13 -->
 
 <!-- session-end: 2026-05-17 17:18:51 -->
+
+---
+
+## 세션 2026-05-17 (6차) — F006 render_mode 4가지 선택 체계 + Remotion 렌더링 구현
+
+### 사용자 지시 요약
+- Remotion 적용 결과가 PPT 슬라이드에 페이드만 추가한 것처럼 보인다는 피드백
+- 동영상 자체를 더 영상답게 만들 방법 요청
+- 기존 방식(ffmpeg) + A안(Remotion 네이티브) + B안(영상 배경) + C안(Ken Burns) 4가지 모두 선택 가능하게 구현 요청
+- 서브에이전트 활용, 완성도 97% 이상, 각 단계별 체크포인트 요청
+
+### Claude 작업 요약
+
+**1단계: 4가지 render_mode 설계 및 Remotion 구현 계획**
+- render_mode 스키마 추가: 'ffmpeg' / 'kenburns' / 'video_bg' / 'remotion_native'
+- 각 모드별 구현:
+  - ffmpeg: 기존 방식 (단순, 빠름)
+  - kenburns: 슬라이드 전체 구간에서 연속 패닝/줌 애니메이션
+  - video_bg: 애니메이션 그라디언트 배경 + JSON 텍스트 오버레이
+  - remotion_native: 분할 레이아웃 + 숫자 카운터 애니메이션
+
+**2단계: Remotion 컴포넌트 구현 (3개)**
+- **F006Video.tsx** (Ken Burns 효과):
+  - 슬라이드마다 고정 배경에서 Ken Burns 패닝/줌 (2~3초)
+  - 좌상단 → 우하단, 우상단 → 좌하단 등 방향 자동 선택
+  - 자막 오버레이 + 페이드/슬라이드/와이프/clockWipe 전환 효과
+
+- **F006VideoB.tsx** (영상 배경 모드):
+  - 동적 그라디언트 배경 (색상 애니메이션)
+  - 슬라이드 텍스트 JSON 기반 렌더링
+  - 텍스트 페이드인/아웃 타이밍 제어
+
+- **F006VideoA.tsx** (Remotion 네이티브):
+  - 좌 40% 이미지 + 우 60% 텍스트 분할 레이아웃
+  - 텍스트 아래 숫자 카운터 애니메이션 (예: 0→100)
+  - 배경 색상 바뀜
+
+**3단계: 백엔드 Python 스테이지 신규 생성**
+- **stage04b_video_json.py**: PNG 이미지 생성 없이 슬라이드 텍스트만 JSON 배열로 출력 (video_bg/remotion_native용)
+- **stage05r_remotion_b.py**: npx remotion render로 F006VideoB 컴포지션 렌더링 (video_bg 모드)
+- **stage05r_remotion_a.py**: npx remotion render로 F006VideoA 컴포지션 렌더링 (remotion_native 모드)
+
+**4단계: 오케스트레이터 라우팅**
+- orchestrator.py: STAGE_04/STAGE_05에서 render_mode 값에 따라 분기
+  - 'ffmpeg': 기존 STAGE_04 (PNG) → STAGE_05_EDIT (FFmpeg concat)
+  - 'kenburns': 기존 STAGE_04 + 수정 (Ken Burns 배경) → STAGE_05_EDIT
+  - 'video_bg': STAGE_04B (JSON) → STAGE_05R_REMOTION_B
+  - 'remotion_native': STAGE_04B (JSON) → STAGE_05R_REMOTION_A
+
+**5단계: 프론트엔드 UI**
+- F006View.vue Step 3에서 4개 render_mode 선택 카드 표시 (라디오 버튼)
+- 각 모드별 설명 텍스트 + 예상 결과 시각화
+
+### 주요 결정사항
+- render_mode는 스키마에 enum으로 정의, use_remotion은 deprecated 처리 (호환성 유지)
+- Remotion 프로젝트는 npm으로 별도 관리 (pipelines/f006_youtube_v4/remotion/)
+- JSON 모드(stage04b)는 이미지 생성 스킵 → 속도 향상
+- 각 모드는 완전히 독립적인 파이프라인 (skip chain 지원)
+
+### 파일 통계
+- 신규 생성: 12개 (Remotion 6개, Python 스테이지 3개, 기타 3개)
+- 수정: 7개 (schemas, orchestrator, stage04_video, F006View, main.py 등)
+- 총 추가 줄 수: ~2000줄
+
+### 검증 완료
+- Python AST 구문 검사 모든 파일 통과 ✓
+- render_mode 4종 스키마 정의 확인 ✓
+- Remotion 프로젝트 구조 타입스크립트 검증 ✓
+- 각 모드별 stage 라우팅 로직 확인 ✓
+
+### 다음 세션 시작 포인트
+- F006 render_mode 선택 후 실행 테스트:
+  - ffmpeg: 기존 방식 동작 확인
+  - kenburns: Ken Burns 애니메이션 렌더링 확인
+  - video_bg: 그라디언트 배경 + 텍스트 오버레이 확인
+  - remotion_native: 분할 레이아웃 + 카운터 애니메이션 확인
+- Node.js/npm 설치 확인 후 Remotion render 실행 가능 여부 확인
+- 4가지 모드별 최종 영상 품질 비교 및 피드백 수집
+
+<!-- session-end: 2026-05-17 -->
+
+<!-- 기타 notes -->
+- 세션 구간: 2026-05-17 (6차 세션)
+- 구현 범위: 12개 신규 파일 생성, 7개 기존 파일 수정
+- 총 코드량: ~2000줄 추가
+- 커밋 예상: feat: F006 render_mode 4가지 선택 체계 (ffmpeg/kenburns/video_bg/remotion_native)

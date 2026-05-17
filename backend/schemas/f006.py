@@ -58,6 +58,8 @@ class F006JobCreateRequest(BaseModel):
     upload_mode: str = Field(default="manual_approval", description="auto/manual_approval")
     # YouTube 공개 설정
     privacy: str = Field(default="private", description="public/unlisted/private")
+    # 자막 생성 여부 (True=자막 포함, False=자막 없음)
+    subtitle_enabled: bool = Field(default=True, description="자막 생성 여부 (True=자막 포함)")
     # 렌더링 모드 선택 (ffmpeg/kenburns/video_bg/remotion_native)
     # ffmpeg: 기존 FFmpeg concat (기본값)
     # kenburns: Remotion + Ken Burns 애니메이션 (PNG 슬라이드 유지)

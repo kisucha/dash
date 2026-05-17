@@ -456,19 +456,18 @@ const SlideRendererB: React.FC<SlideRendererBProps> = ({
 };
 
 // ── 자막 오버레이 ────────────────────────────────────────────────
+// currentSec는 상위(F006VideoB)에서 전역 프레임 기반으로 직접 계산해 전달
+// Sequence 내부 로컬 프레임을 사용하지 않으므로 오디오 타임라인과 정확히 동기화됨
 
 interface SubtitleOverlayProps {
   srtEntries: SRTEntry[];
-  timelineOffsetSec: number;
+  currentSec: number;  // 상위에서 globalFrame / fps로 계산해 전달
 }
 
 const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   srtEntries,
-  timelineOffsetSec,
+  currentSec,
 }) => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const currentSec = timelineOffsetSec + frame / fps;
 
   const activeEntry = srtEntries.find(
     (e) => e.start_sec <= currentSec && currentSec < e.end_sec
@@ -528,6 +527,9 @@ export const F006VideoB: React.FC<F006VideoBProps> = ({
   transition_mode,
 }) => {
   const { fps } = useVideoConfig();
+  // 전역 프레임 — Audio 트랙과 동일한 타임라인 기준
+  const globalFrame = useCurrentFrame();
+  const globalCurrentSec = globalFrame / fps;
 
   // 테마 색상 — 없으면 dark_blue 폴백
   const colors: ThemeColorSet = THEME_COLORS[theme] ?? THEME_COLORS["dark_blue"];
@@ -541,16 +543,6 @@ export const F006VideoB: React.FC<F006VideoBProps> = ({
 
   // 전체 총 프레임 수 (배경 애니메이션 사이클 기준용)
   const totalFrames = slideDurationFrames.reduce((a, b) => a + b, 0);
-
-  // 슬라이드별 타임라인 시작 시간(초) 계산 — 자막 동기화용
-  // 전환 구간 겹침 보정
-  const slideStartSecs: number[] = [];
-  let accFrames = 0;
-  for (let i = 0; i < slides.length; i++) {
-    slideStartSecs.push(accFrames / fps);
-    accFrames += slideDurationFrames[i];
-    if (i < slides.length - 1) accFrames -= TRANSITION_FRAMES;
-  }
 
   return (
     <AbsoluteFill>
@@ -576,10 +568,6 @@ export const F006VideoB: React.FC<F006VideoBProps> = ({
                     channelName={channel_name}
                     totalDuration={totalFrames}
                   />
-                  <SubtitleOverlay
-                    srtEntries={srt_entries}
-                    timelineOffsetSec={slideStartSecs[i]}
-                  />
                 </AbsoluteFill>
               </TransitionSeries.Sequence>
 
@@ -597,6 +585,14 @@ export const F006VideoB: React.FC<F006VideoBProps> = ({
           );
         })}
       </TransitionSeries>
+
+      {/* 자막 오버레이 — TransitionSeries 바깥, 전역 currentSec 사용으로 오디오와 정확히 동기화 */}
+      {srt_entries.length > 0 && (
+        <SubtitleOverlay
+          srtEntries={srt_entries}
+          currentSec={globalCurrentSec}
+        />
+      )}
     </AbsoluteFill>
   );
 };

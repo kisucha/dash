@@ -852,6 +852,95 @@ class CardNewsRenderer:
         self._draw_channel_bar(img, draw)
         return img
 
+    def render_content_with_chart(self, slide: dict, chart_path: str) -> "Image.Image":
+        """content 슬라이드에 우측 차트 패널을 추가한 버전.
+
+        레이아웃: 좌측 항목 텍스트(최대 3개) / 우측 460x540 차트 이미지.
+        차트 로드 실패 시 render_content()로 폴백한다.
+        """
+        from PIL import Image, ImageDraw
+
+        img, draw = self._base_image()
+        t = self.theme
+
+        header_text = _normalize_text(slide.get("title", slide.get("header", "")))
+        bullets = [_normalize_text(b) for b in slide.get("bullets", [])]
+
+        # 헤더 블록 (80px) - accent_dark 배경 + 좌측 6px accent 바
+        draw.rectangle([0, 0, self.W, 80], fill=t["accent_dark"])
+        draw.rectangle([0, 0, 6, 80], fill=t["accent"])
+        header_font = self._font(28, bold=True)
+        draw.text((30, 22), header_text, font=header_font, fill=t["text_primary"])
+
+        # 차트 패널 좌표 (우측 460x540)
+        CHART_X = 780
+        CHART_Y = 90
+        CHART_W = 460
+        CHART_H = 540
+
+        # 차트 이미지 붙이기
+        try:
+            chart_img = Image.open(chart_path).convert("RGB")
+            chart_img = chart_img.resize((CHART_W, CHART_H), Image.LANCZOS)
+            img.paste(chart_img, (CHART_X, CHART_Y))
+            # 차트 테두리 (1px accent 색)
+            draw.rectangle(
+                [CHART_X - 1, CHART_Y - 1, CHART_X + CHART_W, CHART_Y + CHART_H],
+                outline=t["accent"], width=1
+            )
+        except Exception as e:
+            logger.warning(f"[CardNewsRenderer] 차트 삽입 실패 - render_content 폴백: {e}")
+            return self.render_content(slide)
+
+        # 좌측 항목 목록 (최대 3개, 번호 박스 포함)
+        item_y = 100
+        item_font = self._font(22, bold=True)
+        desc_font = self._font(17, bold=False)
+        number_size = 44
+        LEFT_MAX_W = CHART_X - 100  # 좌측 항목 텍스트 최대 너비
+
+        for i, bullet in enumerate(bullets[:3]):
+            if item_y + number_size > self.H - 60:
+                break
+
+            box_x = 40
+            # 번호 박스
+            draw.rectangle(
+                [box_x, item_y, box_x + number_size, item_y + number_size],
+                fill=t["number_bg"]
+            )
+            num_font = self._font(20, bold=True)
+            num_text = f"{i + 1:02d}"
+            num_bbox = draw.textbbox((0, 0), num_text, font=num_font)
+            nw = num_bbox[2] - num_bbox[0]
+            nh = num_bbox[3] - num_bbox[1]
+            draw.text(
+                (box_x + (number_size - nw) // 2, item_y + (number_size - nh) // 2 - 2),
+                num_text, font=num_font, fill=t["number_text"]
+            )
+
+            # bullet 텍스트: " - " 구분자로 본문/설명 분리
+            text_x = box_x + number_size + 14
+            parts = bullet.split(" - ", 1) if " - " in bullet else [bullet]
+            main_lines = self._wrap_text(parts[0], item_font, LEFT_MAX_W - text_x)[:1]
+            draw.text(
+                (text_x, item_y + 4),
+                main_lines[0] if main_lines else parts[0][:30],
+                font=item_font, fill=t["text_primary"]
+            )
+            if len(parts) > 1:
+                desc_lines = self._wrap_text(parts[1], desc_font, LEFT_MAX_W - text_x)[:1]
+                draw.text(
+                    (text_x, item_y + 30),
+                    desc_lines[0] if desc_lines else parts[1][:40],
+                    font=desc_font, fill=t["text_secondary"]
+                )
+
+            item_y += number_size + 18
+
+        self._draw_channel_bar(img, draw)
+        return img
+
     def render(self, slide: dict) -> "Image.Image":
         """슬라이드 타입별 render 메서드를 디스패치한다.
 
@@ -976,13 +1065,55 @@ class Stage04VideoGen(BaseStage, BasePipeline):
             if custom_font:
                 cn_renderer.set_custom_font(custom_font)
 
+            # cardnews 차트 인프라 초기화
+            from pipelines.f006_youtube_v4.stages.chart_generator import (
+                extract_ticker, detect_indicators, ChartGenerator
+            )
+            _cn_user_context = input_data.get("user_context", "")
+            _cn_ticker = extract_ticker(selected_topic, _cn_user_context)
+            _cn_effective_ticker: str = _cn_ticker or "^KS11"
+            cn_chart_dir = output_dir.parent / "charts"
+            cn_chart_dir.mkdir(parents=True, exist_ok=True)
+            _cn_theme = CARDNEWS_THEMES.get(theme_name, CARDNEWS_THEMES["dark_blue"])
+            cn_chart_gen = ChartGenerator(theme_colors=_cn_theme)
+
             cn_clips: list[dict] = []
             for slide in slides:
                 slide_no: int = slide.get("slide_no", len(cn_clips) + 1)
                 slide_type: str = slide.get("type", "content")
+                is_last_cn: bool = (slide_no == len(slides))
                 out_path = str(output_dir / f"slide_{slide_no:02d}.png")
                 try:
-                    img = cn_renderer.render(slide)
+                    # content 슬라이드 + 마지막 슬라이드 아님 -> 차트 감지 시도
+                    cn_chart_path = None
+                    if slide_type == "content" and not is_last_cn:
+                        slide_text = (
+                            slide.get("title", "")
+                            + " "
+                            + " ".join(slide.get("bullets", []))
+                        )
+                        cn_indicators = detect_indicators(slide_text)
+                        if cn_indicators:
+                            cn_chart_out = str(cn_chart_dir / f"chart_cn_{slide_no:02d}.png")
+                            cn_ok = cn_chart_gen.generate(
+                                ticker=_cn_effective_ticker,
+                                indicators=cn_indicators,
+                                output_path=cn_chart_out,
+                                period="3mo",
+                                chart_size=(460, 540),
+                            )
+                            if cn_ok:
+                                cn_chart_path = cn_chart_out
+                                logger.info(
+                                    f"[F006][STAGE_04][job_id={job_id}] "
+                                    f"[cardnews] 슬라이드 {slide_no} 차트 생성: {cn_indicators}"
+                                )
+
+                    if cn_chart_path:
+                        img = cn_renderer.render_content_with_chart(slide, cn_chart_path)
+                    else:
+                        img = cn_renderer.render(slide)
+
                     img.save(out_path, "PNG")
                     narration: str = slide.get("narration", slide.get("description", ""))
                     cn_clips.append({

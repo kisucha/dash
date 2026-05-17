@@ -116,12 +116,15 @@ class Stage05Edit(BaseStage, BasePipeline):
             logger.error(f"[F006][STAGE_05][job_id={job_id}] FFmpeg 실패: {e}")
             raise RuntimeError(f"STAGE_05 FFmpeg 편집 실패: {e}") from e
 
-        # Whisper 자막 생성 (오디오 있는 경우에만)
+        # Whisper 자막 생성 (subtitle_enabled=True이고 오디오 있는 경우에만)
+        subtitle_enabled: bool = bool(input_data.get("subtitle_enabled", True))
         has_subtitles: bool = False
-        if audio_file_path and Path(audio_file_path).exists():
+        if subtitle_enabled and audio_file_path and Path(audio_file_path).exists():
             has_subtitles = self._run_whisper_transcribe(
                 audio_file_path, output_srt, job_id
             )
+        elif not subtitle_enabled:
+            logger.info(f"[F006][STAGE_05][job_id={job_id}] 자막 비활성화 - Whisper 건너뜀")
 
         # 결과 메타데이터 수집
         output_file = Path(output_video)
