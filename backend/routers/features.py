@@ -379,6 +379,13 @@ FEATURES: dict[str, dict] = {
         "supports_schedule": False,
         "input_schema": [],
     },
+    "F006": {
+        "feature_id": "F006",
+        "name": "유튜브 제작(채팅기반 V4)",
+        "description": "AI 채팅에서 수집한 정보로 YouTube 컨텐츠 자동 제작. Remotion 렌더링 지원.",
+        "supports_schedule": False,
+        "input_schema": [],
+    },
 }
 
 
