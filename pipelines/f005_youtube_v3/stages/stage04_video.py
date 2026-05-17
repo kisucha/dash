@@ -470,8 +470,11 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         total = len(slides)
         clips: list[dict] = []
 
-        # ── 우측 패널 이미지 전략 결정 ────────────────────────────────
-        # 채널 카테고리에 따라 차트(금융) 또는 카테고리 이미지(기타)로 분기한다.
+        # ── 우측 패널 이미지 인프라 초기화 ──────────────────────────────
+        # 전략 결정은 슬라이드 단위로 수행 (채널 카테고리가 아닌 슬라이드 텍스트 기반).
+        # 슬라이드 텍스트에 금융 지표 키워드 존재 → 차트 우선
+        # 지표 키워드 없고 채널 카테고리 존재 → image_fetcher
+        # 둘 다 없으면 → 텍스트 전용 레이아웃
         channel_category: str = input_data.get("channel_category", "")
 
         from pipelines.f005_youtube_v3.stages.chart_generator import (
@@ -482,41 +485,29 @@ class Stage04VideoGen(BaseStage, BasePipeline):
         user_context = input_data.get("user_context", "")
         ticker = extract_ticker(selected_topic, user_context)
 
-        # 금융 카테고리 키워드 집합 — 이 중 하나라도 포함되면 차트 우선
-        _FINANCE_KEYWORDS = {"경제", "재테크", "투자", "금융", "주식"}
-        is_finance_category = any(k in channel_category for k in _FINANCE_KEYWORDS)
+        # 티커 없어도 지표 키워드가 있으면 KOSPI 기본 티커로 차트 생성
+        # ^KS11 = KOSPI 지수 — 종목 불명 시 시장 전반 차트로 대체
+        _DEFAULT_TICKER = "^KS11"
+        effective_ticker: Optional[str] = ticker or _DEFAULT_TICKER
 
-        if ticker and is_finance_category:
-            # 금융 + 티커 확인 → ChartGenerator 사용
-            logger.info(f"[F005][STAGE_04][job_id={job_id}] 금융 카테고리 + 티커={ticker} — 차트 모드")
-            chart_dir = output_dir.parent / "charts"
-            chart_dir.mkdir(parents=True, exist_ok=True)
-            chart_gen = ChartGenerator(theme_colors=theme)
-            img_dir = None
-            use_image_fetcher = False
-        elif ticker and not is_finance_category:
-            # 티커는 있지만 금융 카테고리 아님 → 이미지 모드 우선, 차트 폴백
-            logger.info(f"[F005][STAGE_04][job_id={job_id}] 비금융 + 티커={ticker} — 이미지 모드")
-            chart_gen = None
-            chart_dir = None
+        # 차트 인프라 — 항상 준비 (슬라이드별 지표 감지 후 필요 시 사용)
+        chart_dir = output_dir.parent / "charts"
+        chart_dir.mkdir(parents=True, exist_ok=True)
+        chart_gen = ChartGenerator(theme_colors=theme)
+
+        # 이미지 인프라 — 채널 카테고리 있을 때만 준비
+        use_image_fetcher = bool(channel_category)
+        if use_image_fetcher:
             img_dir = output_dir.parent / "bg_images"
             img_dir.mkdir(parents=True, exist_ok=True)
-            use_image_fetcher = True
-        elif not ticker and channel_category:
-            # 티커 없고 카테고리 있음 → 이미지 모드
-            logger.info(f"[F005][STAGE_04][job_id={job_id}] 카테고리={channel_category} — 이미지 모드")
-            chart_gen = None
-            chart_dir = None
-            img_dir = output_dir.parent / "bg_images"
-            img_dir.mkdir(parents=True, exist_ok=True)
-            use_image_fetcher = True
         else:
-            # 티커 없고 카테고리 불명 → 텍스트 전용
-            logger.info(f"[F005][STAGE_04][job_id={job_id}] 카테고리 불명 — 텍스트 전용")
-            chart_gen = None
-            chart_dir = None
             img_dir = None
-            use_image_fetcher = False
+
+        logger.info(
+            f"[F005][STAGE_04][job_id={job_id}] "
+            f"ticker={ticker or '없음'} effective={effective_ticker} "
+            f"category={channel_category or '없음'}"
+        )
 
         for slide in slides:
             slide_no: int = slide.get("slide_no", len(clips) + 1)
@@ -527,17 +518,19 @@ class Stage04VideoGen(BaseStage, BasePipeline):
                 # 우측 패널 이미지 경로 — content/summary 타입에서만 시도
                 chart_path = None
                 if slide_type in ("content", "summary"):
-                    if chart_gen and ticker:
-                        # 금융 차트 생성
-                        slide_text = (
-                            slide.get("title", "")
-                            + " "
-                            + " ".join(slide.get("bullets", []))
-                        )
-                        indicators = detect_indicators(slide_text)
+                    slide_text = (
+                        slide.get("title", "")
+                        + " "
+                        + " ".join(slide.get("bullets", []))
+                    )
+                    indicators = detect_indicators(slide_text)
+
+                    if indicators:
+                        # 슬라이드 텍스트에 금융 지표 키워드 감지 → 차트 우선
+                        # 티커 없으면 ^KS11(KOSPI) 기본값 사용
                         chart_out = str(chart_dir / f"chart_{slide_no:02d}.png")
                         ok = chart_gen.generate(
-                            ticker=ticker,
+                            ticker=effective_ticker,
                             indicators=indicators,
                             output_path=chart_out,
                             period="3mo",
@@ -545,8 +538,12 @@ class Stage04VideoGen(BaseStage, BasePipeline):
                         )
                         if ok:
                             chart_path = chart_out
+                            logger.info(
+                                f"[F005][STAGE_04][job_id={job_id}] "
+                                f"슬라이드 {slide_no}: 지표={indicators} 차트 생성"
+                            )
                     elif use_image_fetcher:
-                        # 카테고리 배경 이미지 다운로드 또는 Pillow 생성
+                        # 지표 없음 + 채널 카테고리 있음 → 카테고리 이미지
                         img_out = str(img_dir / f"bg_{slide_no:02d}.png")
                         ok = fetch_slide_image(
                             channel_category=channel_category,

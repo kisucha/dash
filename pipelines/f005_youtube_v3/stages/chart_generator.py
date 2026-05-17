@@ -193,6 +193,17 @@ class ChartGenerator:
             logger.warning("[ChartGenerator] matplotlib 미설치 — 차트 생성 건너뜀")
             return False
 
+        # 한글 폰트 설정 — Windows 맑은 고딕 우선
+        try:
+            from matplotlib import font_manager
+            _KR_FONTS = ["Malgun Gothic", "NanumGothic", "AppleGothic"]
+            for _f in _KR_FONTS:
+                if any(_f.lower() in fm.name.lower() for fm in font_manager.fontManager.ttflist):
+                    matplotlib.rcParams["font.family"] = _f
+                    break
+        except Exception:
+            pass  # 폰트 설정 실패 시 경고 무시하고 계속
+
         # 데이터 수집
         try:
             df = yf.download(ticker, period=period, progress=False, auto_adjust=True)
@@ -204,8 +215,15 @@ class ChartGenerator:
             logger.warning(f"[ChartGenerator] 데이터 없음 — ticker={ticker}, period={period}")
             return False
 
-        # 컬럼명 소문자 정규화 (yfinance 버전별 차이 대응)
-        df.columns = [c.lower() if isinstance(c, str) else c for c in df.columns]
+        # 컬럼명 소문자 정규화 — yfinance 1.x는 단일 티커도 MultiIndex 반환 가능
+        # MultiIndex: ('Close', 'AAPL') → 첫 번째 요소(메트릭명)만 추출
+        if hasattr(df.columns, "levels"):
+            df.columns = [
+                c[0].lower() if isinstance(c, tuple) else c.lower()
+                for c in df.columns
+            ]
+        else:
+            df.columns = [c.lower() if isinstance(c, str) else c for c in df.columns]
 
         # close 컬럼 확인
         if "close" not in df.columns:
