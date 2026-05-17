@@ -255,7 +255,7 @@ function onKeydown(e) {
   }
 }
 
-// 마지막 assistant 메시지 — F005 컨텐츠 만들기 버튼 표시 기준
+// 마지막 assistant 메시지 — 컨텐츠 만들기 버튼 표시 기준
 // loading=false인 마지막 assistant 메시지에만 버튼 노출
 const lastAssistantMsgId = computed(() => {
   const assistants = messages.value.filter(m => m.role === 'assistant' && !m.loading)
@@ -263,11 +263,20 @@ const lastAssistantMsgId = computed(() => {
   return assistants[assistants.length - 1].id
 })
 
-// F005 컨텐츠 만들기 — 마지막 assistant 메시지 내용을 sessionStorage에 저장 후 F005 페이지로 이동
+// 드롭다운 열림 여부
+const showCreateDropdown = ref(false)
+
+// 컨텐츠 만들기 — sessionStorage에 저장 후 선택한 파이프라인 페이지로 이동
 // URL 쿼리 파라미터 길이 제한(~2000자) 우회를 위해 sessionStorage 사용
-function goToF005(msgContent) {
-  sessionStorage.setItem('f005_chat_context', msgContent ?? '')
-  router.push({ name: 'F005Feature' })
+function goToFeature(msgContent, feature) {
+  showCreateDropdown.value = false
+  if (feature === 'F006') {
+    sessionStorage.setItem('f006_chat_context', msgContent ?? '')
+    router.push({ name: 'F006Feature' })
+  } else {
+    sessionStorage.setItem('f005_chat_context', msgContent ?? '')
+    router.push({ name: 'F005Feature' })
+  }
 }
 
 // 부모(App.vue)가 라우트 이동 등의 상황에서 포커스를 복원할 수 있도록 노출
@@ -337,9 +346,26 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
               @click="sendSuggestion(sug)"
             >{{ sug }}</button>
           </div>
-          <!-- F005 컨텐츠 만들기 버튼 — 마지막 assistant 메시지(로딩 완료)에만 표시 -->
-          <div v-if="!msg.loading && msg.id === lastAssistantMsgId" class="f005-action-row">
-            <button class="btn-f005-create" @click="goToF005(msg.content)">F005 컨텐츠 만들기</button>
+          <!-- 컨텐츠 만들기 드롭다운 — 마지막 assistant 메시지(로딩 완료)에만 표시 -->
+          <div v-if="!msg.loading && msg.id === lastAssistantMsgId" class="create-action-row">
+            <div class="create-dropdown-wrap">
+              <button
+                class="btn-create-main"
+                @click="showCreateDropdown = !showCreateDropdown"
+              >
+                컨텐츠 만들기 ▾
+              </button>
+              <div v-if="showCreateDropdown" class="create-dropdown-menu">
+                <button class="dropdown-item" @click="goToFeature(msg.content, 'F005')">
+                  <span class="dropdown-badge f005">F005</span>
+                  유튜브 제작 (채팅기반)
+                </button>
+                <button class="dropdown-item" @click="goToFeature(msg.content, 'F006')">
+                  <span class="dropdown-badge f006">F006</span>
+                  유튜브 제작 V4 + Remotion
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -615,8 +641,8 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
   cursor: not-allowed;
 }
 
-/* F005 컨텐츠 만들기 버튼 */
-.f005-action-row {
+/* 컨텐츠 만들기 드롭다운 */
+.create-action-row {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid #e0e0e0;
@@ -624,7 +650,11 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
   justify-content: flex-end;
 }
 
-.btn-f005-create {
+.create-dropdown-wrap {
+  position: relative;
+}
+
+.btn-create-main {
   font-size: 12px;
   font-weight: 600;
   padding: 5px 14px;
@@ -636,7 +666,46 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
   transition: background 0.15s;
   white-space: nowrap;
 }
-.btn-f005-create:hover { background: #6d28d9; }
+.btn-create-main:hover { background: #6d28d9; }
+
+.create-dropdown-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.13);
+  min-width: 220px;
+  z-index: 100;
+  overflow: hidden;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.dropdown-item:hover { background: #f5f0ff; }
+
+.dropdown-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.dropdown-badge.f005 { background: #ede9fe; color: #6d28d9; }
+.dropdown-badge.f006 { background: #d1fae5; color: #059669; }
 
 /* 전송 버튼 */
 .send-btn {
