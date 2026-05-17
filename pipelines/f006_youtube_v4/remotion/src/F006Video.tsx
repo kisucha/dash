@@ -16,8 +16,6 @@ import {
 } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
 import { slide } from "@remotion/transitions/slide";
-import { wipe } from "@remotion/transitions/wipe";
-import { clockWipe } from "@remotion/transitions/clock-wipe";
 import { getTheme } from "./themes";
 
 // ── Props 타입 ──────────────────────────────────────────────────────
@@ -67,8 +65,8 @@ function getTransitionPresentation(
   if (mode === "slide_only") return slide({ direction: "from-right" });
 
   // auto 모드 - 슬라이드 타입별 다른 전환
-  if (fromType === "title") return wipe({ direction: "from-bottom-left" });
-  if (toType === "summary") return clockWipe({ direction: "from-top-left" });
+  if (fromType === "title") return slide({ direction: "from-bottom" });
+  if (toType === "summary") return fade();
   if (toType === "quote") return fade();
   return slide({ direction: "from-right" });
 }
