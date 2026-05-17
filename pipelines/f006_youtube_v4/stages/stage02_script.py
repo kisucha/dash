@@ -122,7 +122,6 @@ class Stage02Script(BaseStage, BasePipeline):
         search_context: str = input_data.get("search_context", "")
         topics: list = input_data.get("topics", [])
         days: int = int(input_data.get("days", 7))
-        today_str: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         # 슬라이드 수 및 목표 글자 수 계산
         # content 슬라이드: 분당 80초 기준, 최소 4장 최대 12장
@@ -155,8 +154,9 @@ class Stage02Script(BaseStage, BasePipeline):
         context_section: str = ""
         if primary_context and primary_context.strip() and "(검색 결과 없음" not in primary_context:
             context_section = (
-                f"\n[리서치 컨텍스트 - {today_str} 기준]\n"
-                f"아래는 이 주제와 관련된 리서치 정보입니다. 슬라이드 작성 시 적극 활용하세요.\n"
+                f"\n[리서치 컨텍스트 - 실제 검색 데이터]\n"
+                f"아래는 실제 검색으로 수집한 리서치 데이터입니다.\n"
+                f"반드시 아래 데이터만 사용하세요. 자체 지식으로 수치/사실/사건을 추가하거나 만들어내는 것을 엄격히 금지합니다.\n"
                 f"{primary_context[:2500]}\n"
             )
 
@@ -192,8 +192,6 @@ class Stage02Script(BaseStage, BasePipeline):
             topics_text=topics_text,
             hook_description=hook_description,
             cta_description=cta_description,
-            today_str=today_str,
-            days=days,
         )
 
         logger.info(
@@ -290,8 +288,6 @@ class Stage02Script(BaseStage, BasePipeline):
         topics_text: str,
         hook_description: str,
         cta_description: str,
-        today_str: str = "",
-        days: int = 7,
     ) -> str:
         """Ollama에 전달할 슬라이드 생성 프롬프트 구성."""
         # 참고 주제 후보 섹션 (있을 때만 포함)
@@ -309,13 +305,14 @@ class Stage02Script(BaseStage, BasePipeline):
             else ""
         )
 
-        date_constraint: str = ""
-        if today_str:
-            date_constraint = (
-                f"오늘 날짜: {today_str}\n"
-                f"[중요] 반드시 {today_str} 기준 최근 {days}일 이내의 정보만 사용하세요. "
-                f"{days}일보다 오래된 사건, 수치, 뉴스는 언급하지 마세요.\n\n"
-            )
+        # 날짜를 LLM에 직접 노출하지 않음 — LLM이 학습 컷오프 이후 날짜를 보면
+        # "미래 예측 모드"로 전환되어 자체 추측 데이터를 생성하는 문제 방지
+        date_constraint: str = (
+            "[절대 규칙] 아래 [리서치 컨텍스트]에 제공된 데이터만 사용하세요.\n"
+            "제공된 컨텍스트에 없는 수치, 사건, 뉴스, 통계를 스스로 만들거나 추측하는 것을 엄격히 금지합니다.\n"
+            "미래 예측 표현(~할 것으로 예상, ~될 전망, ~할 것 같다 등)은 절대 사용하지 마세요.\n"
+            "불확실한 정보는 '제공된 자료 기준'이라고 명시하세요.\n\n"
+        )
 
         prompt: str = (
             f"당신은 뉴스/정보 채널 전문 유튜브 스크립트 작가입니다.\n"
@@ -367,7 +364,9 @@ class Stage02Script(BaseStage, BasePipeline):
             f"    }}\n"
             f"  ]\n"
             f"}}\n"
-            f"반드시 JSON만 출력하세요."
+            f"반드시 JSON만 출력하세요.\n"
+            f"[최종 확인] 제공된 [리서치 컨텍스트] 데이터만 사용했는지 확인하세요. "
+            f"자체 추측 수치나 미래 예측 표현이 없어야 합니다."
         )
         return prompt
 
