@@ -122,6 +122,8 @@ class Stage02Script(BaseStage, BasePipeline):
         search_context: str = input_data.get("search_context", "")
         topics: list = input_data.get("topics", [])
         days: int = int(input_data.get("days", 7))
+        # 기준 날짜: 사용자가 명시하지 않으면 오늘 날짜가 기본값
+        today_str: str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         # 슬라이드 수 및 목표 글자 수 계산
         # content 슬라이드: 분당 80초 기준, 최소 4장 최대 12장
@@ -154,9 +156,9 @@ class Stage02Script(BaseStage, BasePipeline):
         context_section: str = ""
         if primary_context and primary_context.strip() and "(검색 결과 없음" not in primary_context:
             context_section = (
-                f"\n[리서치 컨텍스트 - 실제 검색 데이터]\n"
-                f"아래는 실제 검색으로 수집한 리서치 데이터입니다.\n"
-                f"반드시 아래 데이터만 사용하세요. 자체 지식으로 수치/사실/사건을 추가하거나 만들어내는 것을 엄격히 금지합니다.\n"
+                f"\n[리서치 컨텍스트 - {today_str} 기준 실제 검색 데이터]\n"
+                f"아래는 기준 날짜에 실제 검색·수집된 데이터입니다. 이 데이터만 사용하세요.\n"
+                f"자체 지식으로 수치/사실/사건을 추가하거나 만들어내는 것을 엄격히 금지합니다.\n"
                 f"{primary_context[:2500]}\n"
             )
 
@@ -192,6 +194,7 @@ class Stage02Script(BaseStage, BasePipeline):
             topics_text=topics_text,
             hook_description=hook_description,
             cta_description=cta_description,
+            today_str=today_str,
         )
 
         logger.info(
@@ -288,6 +291,7 @@ class Stage02Script(BaseStage, BasePipeline):
         topics_text: str,
         hook_description: str,
         cta_description: str,
+        today_str: str = "",
     ) -> str:
         """Ollama에 전달할 슬라이드 생성 프롬프트 구성."""
         # 참고 주제 후보 섹션 (있을 때만 포함)
@@ -305,13 +309,16 @@ class Stage02Script(BaseStage, BasePipeline):
             else ""
         )
 
-        # 날짜를 LLM에 직접 노출하지 않음 — LLM이 학습 컷오프 이후 날짜를 보면
-        # "미래 예측 모드"로 전환되어 자체 추측 데이터를 생성하는 문제 방지
+        # 오늘 날짜를 기준으로 명시하되, LLM이 자체 지식으로 데이터를 만들지 않도록
+        # "아래 검색 데이터가 이 날짜 기준으로 실제 수집된 것"임을 명확히 한다.
+        # 핵심: "최근 N일 이내만 써라" 지시 제거 — 이 지시가 LLM의 미래예측 모드를 유발했음
+        date_line: str = f"기준 날짜: {today_str}\n" if today_str else ""
         date_constraint: str = (
-            "[절대 규칙] 아래 [리서치 컨텍스트]에 제공된 데이터만 사용하세요.\n"
-            "제공된 컨텍스트에 없는 수치, 사건, 뉴스, 통계를 스스로 만들거나 추측하는 것을 엄격히 금지합니다.\n"
+            f"{date_line}"
+            "[절대 규칙] 아래 [리서치 컨텍스트]는 기준 날짜에 실제 검색·수집된 데이터입니다.\n"
+            "반드시 이 데이터만 사용하세요. 컨텍스트에 없는 수치·사건·통계를 스스로 만들거나 추측하는 것을 엄격히 금지합니다.\n"
             "미래 예측 표현(~할 것으로 예상, ~될 전망, ~할 것 같다 등)은 절대 사용하지 마세요.\n"
-            "불확실한 정보는 '제공된 자료 기준'이라고 명시하세요.\n\n"
+            "불확실한 정보는 반드시 '제공된 자료 기준'이라고 명시하세요.\n\n"
         )
 
         prompt: str = (
