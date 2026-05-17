@@ -85,7 +85,17 @@ export const useF005Store = defineStore('f005', () => {
       jobs.value.unshift(res.data)
       return res.data
     } catch (e) {
-      errorMsg.value = e.response?.data?.detail ?? e.message
+      const detail = e.response?.data?.detail
+      if (Array.isArray(detail) && detail.length > 0) {
+        // Pydantic 검증 오류 → 첫 번째 오류 메시지만 사람이 읽기 쉽게 표시
+        const first = detail[0]
+        const field = first.loc?.slice(1).join('.') ?? ''
+        errorMsg.value = field ? `[${field}] ${first.msg}` : first.msg
+      } else if (typeof detail === 'string') {
+        errorMsg.value = detail
+      } else {
+        errorMsg.value = e.message
+      }
       throw e
     } finally {
       loading.value = false

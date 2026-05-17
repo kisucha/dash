@@ -23,7 +23,7 @@ class F005JobCreateRequest(BaseModel):
     # 영상 주제 — AI 채팅에서 확인한 주제 (필수)
     topic: str = Field(..., min_length=2, max_length=200, description="영상 주제 — 채팅에서 확인한 주제")
     # 채팅에서 수집한 정보/메모 (필수)
-    user_context: str = Field(..., min_length=10, max_length=5000, description="채팅에서 수집한 정보/메모")
+    user_context: str = Field(..., min_length=10, max_length=50000, description="채팅에서 수집한 정보/메모")
     # 추가 키워드 힌트 (선택)
     keywords_hint: Optional[str] = Field(default=None, max_length=200, description="추가 키워드 힌트")
     # 트렌드 보완 검색 기간(일) — 보완 검색은 항상 searxng 사용

@@ -370,7 +370,7 @@ onMounted(async () => {
               rows="6"
               placeholder="AI 채팅에서 확인한 정보, 메모, 조사 내용을 자유롭게 입력하세요. (10자 이상)"
             ></textarea>
-            <p class="field-hint">ChatGPT, Claude 등 AI 채팅에서 리서치한 내용을 붙여넣으세요. 스크립트 품질에 직결됩니다.</p>
+            <p class="field-hint">ChatGPT, Claude 등 AI 채팅에서 리서치한 내용을 붙여넣으세요. 스크립트 품질에 직결됩니다. (최대 50,000자)</p>
           </div>
 
           <div class="form-grid">
