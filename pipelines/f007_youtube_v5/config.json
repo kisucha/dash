@@ -1,0 +1,25 @@
+{
+  "feature_id": "F007",
+  "name": "F007 YouTube 자동화 파이프라인 v5",
+  "version": "1.0.0",
+  "channels": {
+    "finance": {
+      "default_model": "gemma3:27b",
+      "default_tts_voice": "F1",
+      "default_slide_theme": "dark_blue",
+      "upload_mode": "manual_approval",
+      "search_query_template": "주식 ETF 경제 투자 뉴스 {today}"
+    },
+    "language": {
+      "default_model": "gemma3:27b",
+      "default_tts_voice": "F3",
+      "default_slide_theme": "clean_white",
+      "upload_mode": "manual_approval",
+      "search_query_template": "영어 학습 표현 회화 유튜브 {today}"
+    }
+  },
+  "storage": {
+    "results_dir": "storage/results/f007",
+    "bgm_dir": "storage/bgm"
+  }
+}

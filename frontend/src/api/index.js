@@ -251,3 +251,27 @@ export const approveF006Job = (jobId, finalMeta = {}) =>
 export const deleteF006Job = (jobId) => api.delete(`/api/f006/jobs/${jobId}`)
 export const rerunF006FromTTS = (jobId, payload) =>
   api.post(`/api/f006/jobs/${jobId}/rerun-from-tts`, payload)
+
+// ────────────────────────────────────────────────
+// F007 API — 유튜브 자동화 파이프라인 V5 (채널 유형 분기 지원)
+// ────────────────────────────────────────────────
+
+// F007 작업 목록 조회 (cursor 기반 페이징, channelType/status 필터)
+export const getF007Jobs = (limit = 20, cursor = null, channelType = null, status = null) =>
+  api.get('/api/f007/jobs', {
+    params: {
+      limit,
+      ...(cursor != null ? { cursor } : {}),
+      ...(channelType ? { channel_type: channelType } : {}),
+      ...(status ? { status } : {}),
+    }
+  })
+
+// F007 작업 단건 조회 (스테이지 포함)
+export const getF007Job = (jobId) => api.get(`/api/f007/jobs/${jobId}`)
+
+// F007 새 작업 생성
+export const createF007Job = (params) => api.post('/api/f007/jobs', params)
+
+// F007 작업 삭제 (hard delete)
+export const deleteF007Job = (jobId) => api.delete(`/api/f007/jobs/${jobId}`)

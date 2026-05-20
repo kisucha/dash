@@ -27,7 +27,7 @@ from fastapi.staticfiles import StaticFiles
 from core.config import DB_PATH
 from core.database import init_db
 from models.task import row_to_dict
-from routers import chat, features, health, models, model_assets, schedules, search, tasks, f001, f004, f005, f006
+from routers import chat, features, health, models, model_assets, schedules, search, tasks, f001, f004, f005, f006, f007
 
 
 async def _restore_schedules(app: FastAPI) -> None:
@@ -180,6 +180,30 @@ async def _restore_f006_running_jobs() -> None:
         print(f"[App] F006 content_jobs id={job_id} 오케스트레이터 재기동 완료")
 
 
+async def _restore_f007_running_jobs() -> None:
+    """서버 재시작 시 F007 RUNNING 상태 content_jobs 오케스트레이터 재기동."""
+    from services.f007_service import f007_service
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            """
+            UPDATE stages
+            SET status = 'PENDING', started_at = NULL, finished_at = NULL
+            WHERE status = 'RUNNING' AND job_id IN (
+                SELECT id FROM content_jobs WHERE feature_id = 'F007' AND status = 'RUNNING'
+            )
+            """
+        )
+        cursor = await conn.execute(
+            "SELECT id FROM content_jobs WHERE feature_id = 'F007' AND status = 'RUNNING'"
+        )
+        rows = await cursor.fetchall()
+        await conn.commit()
+    for row in rows:
+        job_id = row[0]
+        f007_service._spawn_orchestrator(job_id)
+        print(f"[App] F007 content_jobs id={job_id} 오케스트레이터 재기동 완료")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """앱 생명주기 관리 — 시작 시 DB/스케줄러 초기화, 종료 시 스케줄러 정지."""
@@ -200,6 +224,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # F006 RUNNING content_jobs 오케스트레이터 재기동
     await _restore_f006_running_jobs()
+
+    # F007 RUNNING content_jobs 오케스트레이터 재기동
+    await _restore_f007_running_jobs()
 
     scheduler = AsyncIOScheduler()
     scheduler.start()
@@ -246,6 +273,7 @@ def create_app() -> FastAPI:
     app.include_router(f004.router)
     app.include_router(f005.router)
     app.include_router(f006.router)
+    app.include_router(f007.router)
 
     # F003 결과 파일 정적 서빙 (이미지/동영상) — 프로젝트 루트 기준 상대 경로
     f003_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f003"
@@ -271,6 +299,11 @@ def create_app() -> FastAPI:
     f006_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f006"
     f006_results_dir.mkdir(parents=True, exist_ok=True)
     app.mount("/results/f006", StaticFiles(directory=str(f006_results_dir)), name="f006_results")
+
+    # F007 결과 파일 정적 서빙 (스크립트/TTS/영상) — 프로젝트 루트 기준 상대 경로
+    f007_results_dir = Path(__file__).parent.parent / "storage" / "results" / "f007"
+    f007_results_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/results/f007", StaticFiles(directory=str(f007_results_dir), html=False), name="f007_results")
 
     @app.get("/", include_in_schema=False)
     async def root():

@@ -1,5 +1,5 @@
 // router/index.js — Vue Router 라우트 정의 및 라우터 인스턴스 생성
-// DashboardView, FeatureView, TaskDetailView, ScheduleView, F001~F006 View 13개 페이지를 등록한다
+// DashboardView, FeatureView, TaskDetailView, ScheduleView, F001~F007 View 15개 페이지를 등록한다
 import { createRouter, createWebHistory } from 'vue-router'
 import DashboardView from '../views/DashboardView.vue'
 import FeatureView from '../views/FeatureView.vue'
@@ -16,7 +16,7 @@ import F006View from '../views/F006View.vue'
 import F006JobDetailView from '../views/F006JobDetailView.vue'
 
 // 라우트 목록 — 각 경로와 컴포넌트를 매핑
-// 중요: /features/F001, /features/F003~F005 는 /features/:id 보다 앞에 등록해야 우선 매칭된다
+// 중요: /features/F001, /features/F003~F007 는 /features/:id 보다 앞에 등록해야 우선 매칭된다
 const routes = [
   {
     path: '/',
@@ -67,6 +67,16 @@ const routes = [
     path: '/f006/jobs/:jobId',
     name: 'F006JobDetail',
     component: F006JobDetailView,
+  },
+  {
+    path: '/features/F007',
+    name: 'F007',
+    component: () => import('../views/F007View.vue'),
+  },
+  {
+    path: '/f007/jobs/:jobId',
+    name: 'F007JobDetail',
+    component: () => import('../views/F007JobDetailView.vue'),
   },
   {
     path: '/features/:id',

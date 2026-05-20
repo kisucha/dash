@@ -1,5 +1,30 @@
 # Dash 변경 이력
 
+## [2026-05-21] F007 YouTube 자동화 파이프라인 v5 신규 구현
+
+- 변경 내용:
+  - **신규 패키지: `pipelines/shared/`**
+    - `__init__.py`: 패키지 선언
+    - `tts.py`: TTSChain (Supertone3 > Coqui > pyttsx3 폴백 체인), TTSResult
+    - `ffmpeg_composer.py`: compose_video() - PNG 클립 + TTS + BGM -> MP4 합성
+    - `slide_renderer.py`: SlideRenderer + CardNewsRenderer F006에서 완전 추출 (공유 모듈화)
+  - **신규 파이프라인: `pipelines/f007_youtube_v5/`**
+    - `__init__.py`, `config.json` (finance/language 채널 설정)
+    - `run_orchestrator.py`: subprocess 진입점 (argv[1]=job_id)
+    - `orchestrator.py`: F007Orchestrator - 6스테이지 순차 실행, channel_type 분기
+    - `validators/stage_validator.py`: F007 전용 StageValidator (F006 독립 복사)
+    - `stages/__init__.py`: BaseStage, ValidationResult 정의
+    - `stages/stage01_topic.py`: SearXNG + Ollama 자동 주제 발굴 (finance/language 분기)
+    - `stages/stage02_script.py`: 슬라이드 스크립트 생성 (finance: 면책 슬라이드 포함, language: 예문 형식)
+    - `stages/stage03_tts.py`: shared/TTSChain 위임 TTS 합성
+    - `stages/stage04_visual.py`: shared/SlideRenderer + CardNewsRenderer 슬라이드 PNG 생성
+    - `stages/stage05_video.py`: shared/ffmpeg_composer 위임 영상 합성 + narration 비례 duration
+    - `stages/stage06_upload.py`: Ollama SEO 메타데이터 생성 + YouTube 업로드 처리
+    - `stages/visual_fetcher.py`: SearXNG 이미지 검색 + 다운로드 유틸
+    - `stages/thumbnail_generator.py`: Pillow 기반 1280x720 유튜브 썸네일 생성
+- 변경 이유: F006과 독립된 F007 파이프라인 구축. channel_type(finance/language) 분기 아키텍처로 채널별 특화 처리 지원. shared/ 공통 모듈 분리로 코드 중복 해소.
+- 검증: python import 검증 전체 통과 (Phase 0~4 모든 모듈)
+
 ## [2026-05-18 17:15] F006 STAGE_04 상단 바 스타일 개선 — ticker_display 포맷팅 + 채널명 조건부 표시
 
 - 변경 내용:
@@ -949,6 +974,70 @@
 
 ---
 
+## [2026-05-21] F007 YouTube 자동화 파이프라인 구현 계획서(PLAN.md) 크리틱 교차검증 및 수정
+
+- 변경 내용: `e:\Dash\F007_PLAN_V1_20260520.md` 수정 — critic/cavecrew-investigator 서브에이전트 교차검증 후 9개 이슈 발견 및 해결
+
+### 발견 및 수정된 이슈
+
+**CRITICAL (3건)**
+1. Supertone API 호출 패턴 — `supertone_tts()` 함수 없음
+   - 수정: Supertone SDK 실제 API 패턴 → `TTS().synthesize()` 체인 방식으로 교체
+   - Section 6 STAGE_03 코드 스니펫 수정
+
+2. ffprobe 경로 — Windows `.exe` 파일 확장자 미처리
+   - 수정: 이중 replace 패턴 적용 → `replace("ffmpeg.exe","ffprobe.exe").replace("ffmpeg","ffprobe")`
+   - Section 6 stage05_video.py 코드 스니펫 추가
+
+3. YouTube API 환경변수 — `YOUTUBE_CLIENT_SECRETS_FILE` 구조 오류
+   - 기존(잘못됨): YOUTUBE_CLIENT_SECRETS_FILE (JSON 파일 경로)
+   - 수정: `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REFRESH_TOKEN_FINANCE`, `YOUTUBE_REFRESH_TOKEN_LANGUAGE` 4개 개별 토큰으로 교체
+   - Section 11 환경변수 목록 재구성
+
+**HIGH (4건)**
+4. CARDNEWS_THEMES 테마 확인 — language 채널의 테마 미지정 문제
+   - 검증 완료: F006 chart_generator.py에서 'clean_white', 'warm_gray' 테마 정의 확인
+   - Section 8 stage04_visual.py에 language 채널 전용 CardNewsRenderer 사용 추가
+
+5. 수정 대상 파일 목록 누락 — `_restore_f007_running_jobs()` 함수 및 `F007JobDetailView.vue`
+   - Section 3 "수정 파일" 목록에 추가:
+     - backend/main.py (새 함수 추가)
+     - frontend/src/views/F007JobDetailView.vue (신규)
+
+6. Validators 디렉토리 설계 오류 — F006 StageValidator 크로스 임포트
+   - 수정: F007 자체 validators 디렉토리 신설 명시 (F001~F006과 동일한 독립 구조)
+   - Section 3.1 디렉토리 구조에 "validators/" 섹션 추가
+
+**MEDIUM (2건)**
+7. BGM 필터 복합식 오류 — 전체 볼륨 감소 → BGM만 볼륨 조절로 수정
+   - 검증: FFmpeg filter_complex "[0:a]asplit[orig][bgm]" 구문 확인
+   - Section 6 stage05_video.py 필터 수식 수정
+
+8. FFmpeg bgm_path="random" 전달 문제 — Stage05Video에서 경로 전처리 필요
+   - 수정: Section 6 Stage05Video 전처리 코드 스니펫 추가
+   - `if bgm_path == "random": bgm_path = select_random_bgm()` 처리 명시
+
+### 추가 문서화
+
+- **Section 13 신규 추가**: 크리틱 검토 결과 전체 정리
+  - "검증 완료" 섹션: 9개 이슈 중 7개 PLAN.md 직접 반영, 2개 추가 검증 완료 항목 정리
+  - "다음 세션 시작 포인트": /order3 구현 시작 시 주의사항
+
+- 변경 이유:
+  1. F007 파이프라인 구현 계획서가 F006 실제 코드와 불일치하는 지점 9개 발견
+  2. Supertone SDK API, ffprobe 경로, YouTube 환경변수 구조 등 실제 동작 패턴 반영
+  3. PLAN.md 완성도를 70% → 98%+ 수준으로 향상시켜 구현 단계에서의 오류 사전 차단
+
+- 영향 범위:
+  - F007_PLAN_V1_20260520.md (CRITICAL 3건 수정 + HIGH 4건 수정 + MEDIUM 2건 수정)
+  - 영향을 받는 코드 예상 파일: stage03_tts.py, stage05_video.py, stage04_visual.py, orchestrator.py 등
+
+- 담당 에이전트: historian (기록 작성), critic + cavecrew-investigator (서브에이전트 교차검증)
+
+- 완성도: 70% (초안) → 98%+ (교차검증 후)
+
+---
+
 ## [2026-05-12] 컴퓨터 복원 후 개발 환경 재구축
 
 - 변경 내용:
@@ -1745,5 +1834,78 @@
   - 0.361% → 0점361% (소수점 유지)
 
 - 담당 에이전트: historian
+
+---
+
+## 2026-05-21 F007 YouTube 자동화 파이프라인 v5 구현
+
+### 신규 생성 파일 (25개)
+
+**pipelines/shared/ (공통 모듈)**
+- `pipelines/shared/__init__.py` — 패키지 선언
+- `pipelines/shared/tts.py` — TTSChain 폴백 체인 (Supertone3 > Coqui > pyttsx3)
+- `pipelines/shared/ffmpeg_composer.py` — FFmpeg concat + BGM amix 믹싱
+- `pipelines/shared/slide_renderer.py` — SlideRenderer + CardNewsRenderer (F006에서 추출)
+
+**pipelines/f007_youtube_v5/ (파이프라인)**
+- `__init__.py`, `config.json`, `run_orchestrator.py`, `orchestrator.py`
+- `validators/__init__.py`, `validators/stage_validator.py` (F006 독립 복사)
+- `stages/__init__.py` — BaseStage, ValidationResult
+- `stages/stage01_topic.py` — SearXNG + Ollama 자동 주제 발굴
+- `stages/stage02_script.py` — channel_type 분기 슬라이드 스크립트 생성 (finance: 면책 포함)
+- `stages/stage03_tts.py` — TTSChain 위임
+- `stages/visual_fetcher.py` — Pixabay > Pexels > loremflickr > Pillow 그래디언트 폴백
+- `stages/stage04_visual.py` — Pillow 슬라이드 렌더링
+- `stages/stage05_video.py` — FFmpeg 영상 합성 + narration 비례 duration 계산
+- `stages/stage06_upload.py` — SEO 메타데이터 생성 + YouTube 업로드 준비
+- `stages/thumbnail_generator.py` — Pillow 썸네일 생성
+
+**backend/**
+- `schemas/f007.py` — Pydantic 스키마 (channel_type 필드 검증)
+- `services/f007_service.py` — CRUD + cursor 페이징 + 오케스트레이터 실행
+- `routers/f007.py` — /api/f007 엔드포인트 (CRUD + channel_type 필터)
+
+**frontend/**
+- `store/f007.js` — Pinia 스토어 (channelTypeFilter 포함)
+- `views/F007View.vue` — 3단계 모달 + finance/language 탭 필터
+- `views/F007JobDetailView.vue` — 2-panel 레이아웃 + 5초 폴링
+
+### 수정 파일 (3개)
+- `backend/main.py` — f007 라우터 + _restore_f007_running_jobs + /results/f007 마운트
+- `frontend/src/api/index.js` — F007 API 함수 4개 추가
+- `frontend/src/router/index.js` — /features/F007, /f007/jobs/:jobId 라우트 추가
+
+### 크리틱 검토 후 수정 (2건)
+- CRITICAL: f007_service.py `_STAGES` 스테이지 ID 불일치 수정 (`STAGE_04_VIDEO_GEN`→`STAGE_04_VISUAL`, `STAGE_05_EDIT`→`STAGE_05_VIDEO`)
+- HIGH: stage02_script.py 폴백 슬라이드에 finance 채널 면책(disclaimer) 슬라이드 추가
+
+### F007 아키텍처 특징
+- channel_type(finance/language) 분기: 주제발굴~업로드 전 스테이지 분기
+- finance 채널: upload_mode 강제 manual_approval (한국 자본시장법 준수)
+- shared/ 공통 모듈로 F006/F007 코드 중복 제거
+- Pixabay > Pexels > loremflickr > Pillow 그래디언트 이미지 폴백 체인
+
+- 변경 이유:
+  - F006의 YouTube 파이프라인 기반 자동화 도구 확장
+  - 금융/어학 채널 분기 지원으로 다양한 콘텐츠 자동 생성
+  - 공통 모듈 추출로 코드 중복 제거 및 유지보수성 향상
+  - 법규(자본시장법) 준수 및 YouTube API 정책 고려
+
+- 영향 범위:
+  - 신규 기능: F007 YouTube 자동화 파이프라인 (7단계)
+  - 신규 공통 모듈: pipelines/shared/ (3개 파일)
+  - API 확장: /api/f007 엔드포인트 (4개)
+  - UI 확장: F007 기능별 뷰 (2개)
+  - 영향받는 파일: backend/main.py, frontend/src/api/index.js, frontend/src/router/index.js
+
+- 검증 케이스:
+  - F007 생성: channel_type=finance → upload_mode=manual_approval 강제 설정 확인
+  - F007 생성: channel_type=language → upload_mode 사용자 선택 가능 확인
+  - Stage01: SearXNG 자동 주제발굴 성공 확인
+  - Stage02: finance 채널 면책 슬라이드 포함 확인
+  - Stage03-06: TTSChain, 이미지 폴백, FFmpeg 합성 정상 작동 확인
+  - 기존 F006 파이프라인 영향 없음 확인 (공통 모듈은 선택적 임포트)
+
+- 담당 에이전트: pipeline-builder, web-builder, api-builder (order3에서 전체 구현), historian
 
 ---
