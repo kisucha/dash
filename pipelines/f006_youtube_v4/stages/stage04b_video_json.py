@@ -12,6 +12,7 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 # 스테이지 베이스 클래스 및 검증 결과 임포트
 from pipelines.f006_youtube_v4.stages import BaseStage, ValidationResult
@@ -19,8 +20,16 @@ from pipelines.f006_youtube_v4.stages import BaseStage, ValidationResult
 # BasePipeline 유틸 사용을 위한 임포트
 from pipelines.base import BasePipeline
 
+# 차트 생성 모듈 - 기술 지표 감지 및 yfinance+matplotlib 차트 PNG 생성
+from pipelines.f006_youtube_v4.stages.chart_generator import (
+    ChartGenerator, extract_ticker, detect_indicators, format_ticker_display
+)
+
 # 로거 - 모듈명으로 계층적 로깅
 logger = logging.getLogger(__name__)
+
+# 프로젝트 루트 경로 - stages -> f006_youtube_v4 -> pipelines -> Dash
+_PROJECT_ROOT: Path = Path(__file__).parent.parent.parent.parent
 
 
 class Stage04bVideoJson(BaseStage, BasePipeline):
@@ -90,6 +99,24 @@ class Stage04bVideoJson(BaseStage, BasePipeline):
             input_data.get("channel_name") or input_data.get("channel_category", "")
         )
 
+        # 차트 디렉토리 준비
+        job_dir: Path = _PROJECT_ROOT / "storage" / "results" / "f006" / str(job_id)
+        charts_dir: Path = job_dir / "charts"
+        charts_dir.mkdir(parents=True, exist_ok=True)
+
+        # 종목 티커 추출 - topic과 channel_name을 컨텍스트로 사용
+        topic: str = input_data.get("topic", "")
+        user_context: str = input_data.get("user_context", "")
+        ticker: str | None = extract_ticker(
+            f"{topic} {channel_name}", user_context
+        )
+        ticker_display: str = format_ticker_display(ticker) if ticker else ""
+        chart_gen = ChartGenerator()  # 기본 다크블루 테마 사용
+        if ticker:
+            logger.info(f"[F006][STAGE_04B][job_id={job_id}] 차트 티커: {ticker}")
+        else:
+            logger.info(f"[F006][STAGE_04B][job_id={job_id}] 티커 미감지 - 차트 생성 건너뜀")
+
         slide_json_data: list[dict] = []
 
         for i, slide in enumerate(slides):
@@ -113,6 +140,28 @@ class Stage04bVideoJson(BaseStage, BasePipeline):
 
             narration: str = slide.get("narration", slide.get("description", ""))
 
+            # content 슬라이드에서 기술 지표 감지 후 차트 생성
+            chart_path: str = ""
+            if slide_type == "content" and ticker:
+                search_text = f"{header} {body_text_clean}"
+                indicators = detect_indicators(search_text)
+                if indicators:
+                    chart_filename = f"chart_{slide_no:02d}.png"
+                    chart_abs_path = str(charts_dir / chart_filename)
+                    success = chart_gen.generate(
+                        ticker, indicators, chart_abs_path, chart_size=(552, 530)
+                    )
+                    if success:
+                        chart_path = f"charts/{chart_filename}"
+                        logger.info(
+                            f"[F006][STAGE_04B][job_id={job_id}] 슬라이드 {slide_no} "
+                            f"차트 생성: {chart_path} (지표: {indicators})"
+                        )
+                    else:
+                        logger.warning(
+                            f"[F006][STAGE_04B][job_id={job_id}] 슬라이드 {slide_no} 차트 생성 실패"
+                        )
+
             slide_json_data.append({
                 "slide_no": slide_no,
                 "type": slide_type,
@@ -120,11 +169,12 @@ class Stage04bVideoJson(BaseStage, BasePipeline):
                 "body_text": body_text_clean,
                 "narration": narration,
                 "keywords": keywords,
+                "chart_path": chart_path,
             })
 
             logger.info(
                 f"[F006][STAGE_04B][job_id={job_id}] 슬라이드 {slide_no} 변환 완료 "
-                f"(type={slide_type}, keywords={len(keywords)}개)"
+                f"(type={slide_type}, keywords={len(keywords)}개, chart={bool(chart_path)})"
             )
 
         logger.info(
@@ -139,6 +189,7 @@ class Stage04bVideoJson(BaseStage, BasePipeline):
             "clips": [],
             "slide_json_data": slide_json_data,
             "channel_name": channel_name,
+            "ticker_display": ticker_display,
             "total_clips": 0,
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }

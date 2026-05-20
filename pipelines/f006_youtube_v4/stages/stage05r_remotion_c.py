@@ -1,7 +1,7 @@
-# 목적: F006 STAGE_05RA - Remotion remotion_native 모드 동영상 렌더링 스테이지.
+# 목적: F006 STAGE_05RC - Remotion fluid_bg 모드 동영상 렌더링 스테이지.
 # PNG 슬라이드 없이 slide_json_data(텍스트 JSON)를 props로 사용.
-# Remotion 컴포지션 "F006VideoA": 전체 네이티브 렌더링 (차트 애니메이션 포함).
-# orchestrator에서 render_mode="remotion_native" 수신 시 Stage05Edit 대신 이 클래스가 선택된다.
+# Remotion 컴포지션 "F006VideoC": 파티클 애니메이션 배경 + 글라스모피즘 카드 렌더링.
+# orchestrator에서 render_mode="fluid_bg" 수신 시 Stage05Edit 대신 이 클래스가 선택된다.
 # STAGE_ID는 DB 호환성을 위해 Stage05Edit와 동일하게 "STAGE_05_EDIT"를 사용한다.
 
 import sys
@@ -37,16 +37,16 @@ _PROJECT_ROOT: Path = Path(__file__).parent.parent.parent.parent
 # Remotion 프로젝트 디렉토리 경로 (절대 경로)
 _REMOTION_DIR: Path = Path(__file__).parent.parent / "remotion"
 
-# Remotion 컴포지션 ID - remotion_native 모드 전용
-_COMPOSITION_ID: str = "F006VideoA"
+# Remotion 컴포지션 ID - fluid_bg 모드 전용
+_COMPOSITION_ID: str = "F006VideoC"
 
-# 출력 파일명 - remotion_native 모드 전용
-_OUTPUT_VIDEO_NAME: str = "output_videoa.mp4"
-_OUTPUT_THUMB_NAME: str = "thumbnail_videoa.png"
+# 출력 파일명 - fluid_bg 모드 전용
+_OUTPUT_VIDEO_NAME: str = "output_videoc.mp4"
+_OUTPUT_THUMB_NAME: str = "thumbnail_videoc.png"
 
 
-class Stage05rRemotionA(BaseStage, BasePipeline):
-    """STAGE_05RA - Remotion remotion_native 모드 동영상 렌더링 스테이지.
+class Stage05rRemotionC(BaseStage, BasePipeline):
+    """STAGE_05RC - Remotion fluid_bg 모드 동영상 렌더링 스테이지.
 
     처리 흐름:
       1. stage05_auto_skipped=True이면 즉시 SKIPPED
@@ -54,16 +54,10 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
       3. 오디오 길이 측정 -> narration 비례 배분으로 슬라이드 duration_sec 계산
          (오디오 없을 때 슬라이드당 5.0초 기본값)
       4. SRT 파일 파싱 -> srt_entries 구성
-      5. remotion_props_a.json 파일 생성
+      5. remotion_props_c.json 파일 생성
       6. npm install (node_modules 없는 경우에만)
-      7. remotion render 실행 (컴포지션: F006VideoA) -> output_videoa.mp4 생성
-      8. remotion still 실행 -> thumbnail_videoa.png 생성
-
-    Stage05rRemotionB와의 차이:
-      - 컴포지션 ID: F006VideoA (vs F006VideoB)
-      - 출력 파일명: output_videoa.mp4 / thumbnail_videoa.png
-      - props 파일명: remotion_props_a.json
-      - renderer 태그: "remotion_a"
+      7. remotion render 실행 (컴포지션: F006VideoC) -> output_videoc.mp4 생성
+      8. remotion still 실행 -> thumbnail_videoc.png 생성
 
     DB 호환성:
       STAGE_ID = "STAGE_05_EDIT" - orchestrator stages 테이블 레코드와 일치
@@ -75,7 +69,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
 
     def get_metadata(self) -> dict:
         """BasePipeline 추상 메서드 충족용."""
-        return {"feature_id": "F006_STAGE05RA", "name": "STAGE_05RA_REMOTION_A"}
+        return {"feature_id": "F006_STAGE05RC", "name": "STAGE_05RC_REMOTION_C"}
 
     def run(self, task_id: int, params: dict) -> dict:
         """BasePipeline 추상 메서드 충족용."""
@@ -92,10 +86,11 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         if slide_json_data or audio_file_path:
             return ValidationResult(is_valid=True)
 
+        # 둘 다 없어도 execute에서 SKIPPED 처리하므로 유효 통과
         return ValidationResult(is_valid=True)
 
     def execute(self, job_id: int, input_data: dict) -> dict:
-        """STAGE_05RA 실행 - Remotion remotion_native 동영상 렌더링.
+        """STAGE_05RC 실행 - Remotion fluid_bg 동영상 렌더링.
 
         Args:
             job_id: content_jobs.id
@@ -114,21 +109,21 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             SKIPPED 시: {stage_id, status="SKIPPED", skip_reason, generated_at}
             COMPLETED 시: {stage_id, status="COMPLETED", video_file_path,
                            subtitle_file_path, duration_sec, resolution,
-                           file_size_mb, has_subtitles, generated_at, renderer="remotion_a"}
+                           file_size_mb, has_subtitles, generated_at, renderer="remotion_c"}
         """
-        logger.info(f"[F006][STAGE_05RA][job_id={job_id}] Remotion remotion_native 렌더링 시작")
+        logger.info(f"[F006][STAGE_05RC][job_id={job_id}] Remotion fluid_bg 렌더링 시작")
 
         # ----------------------------------------------------------------
         # 1. auto_skipped 체크 - STAGE_04 script_only 체인
         # ----------------------------------------------------------------
         if input_data.get("stage05_auto_skipped", False):
             logger.info(
-                f"[F006][STAGE_05RA][job_id={job_id}] STAGE_04 script_only로 인해 자동 SKIPPED"
+                f"[F006][STAGE_05RC][job_id={job_id}] STAGE_04 script_only로 인해 자동 SKIPPED"
             )
             return {
                 "stage_id": "STAGE_05_EDIT",
                 "status": "SKIPPED",
-                "skip_reason": "STAGE_04 script_only skip으로 인해 STAGE_05RA 자동 건너뜀",
+                "skip_reason": "STAGE_04 script_only skip으로 인해 STAGE_05RC 자동 건너뜀",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -140,12 +135,12 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         # ----------------------------------------------------------------
         if not slide_json_data and not audio_file_path:
             logger.info(
-                f"[F006][STAGE_05RA][job_id={job_id}] slide_json_data와 오디오 모두 없어 SKIPPED"
+                f"[F006][STAGE_05RC][job_id={job_id}] slide_json_data와 오디오 모두 없어 SKIPPED"
             )
             return {
                 "stage_id": "STAGE_05_EDIT",
                 "status": "SKIPPED",
-                "skip_reason": "slide_json_data와 오디오 파일이 없어 Remotion native 렌더링 건너뜀",
+                "skip_reason": "slide_json_data와 오디오 파일이 없어 Remotion fluid_bg 렌더링 건너뜀",
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
@@ -165,14 +160,16 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         if audio_file_path and Path(audio_file_path).exists():
             audio_duration = self._get_audio_duration_sec(audio_file_path)
             logger.info(
-                f"[F006][STAGE_05RA][job_id={job_id}] 오디오 길이: {audio_duration:.1f}초"
+                f"[F006][STAGE_05RC][job_id={job_id}] 오디오 길이: {audio_duration:.1f}초"
             )
 
         # 트랜지션 오버랩 보정: TransitionSeries는 전환 1회당 12프레임 겹침(Root.tsx 동기화)
+        # 슬라이드 duration 합계 - overlap = 실제 video 길이 → audio보다 짧아져 음성 잘림
         _n = len(slide_json_data) if slide_json_data else 0
         _overlap_sec = max(0, _n - 1) * 12 / 30.0
         _audio_for_dist = audio_duration + _overlap_sec if audio_duration > 0 else audio_duration
 
+        # slide_json_data에 duration_sec 배분
         if slide_json_data:
             if audio_duration > 0:
                 has_narration = any(s.get("narration") for s in slide_json_data)
@@ -181,20 +178,21 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
                         slide_json_data, _audio_for_dist
                     )
                     logger.info(
-                        f"[F006][STAGE_05RA][job_id={job_id}] narration 비례 배분 - "
+                        f"[F006][STAGE_05RC][job_id={job_id}] narration 비례 배분 - "
                         f"{_audio_for_dist:.1f}초({_overlap_sec:.1f}s 오버랩 포함) / {_n}슬라이드"
                     )
                 else:
                     per_slide = _audio_for_dist / _n
                     durations = {i: per_slide for i in range(_n)}
                     logger.info(
-                        f"[F006][STAGE_05RA][job_id={job_id}] 균등 배분 - "
+                        f"[F006][STAGE_05RC][job_id={job_id}] 균등 배분 - "
                         f"{per_slide:.1f}초/슬라이드 (오버랩 보정 포함)"
                     )
             else:
+                # 오디오 없을 때 슬라이드당 5.0초 기본값
                 durations = {i: 5.0 for i in range(len(slide_json_data))}
                 logger.info(
-                    f"[F006][STAGE_05RA][job_id={job_id}] 오디오 없음 - 슬라이드당 5.0초 기본값"
+                    f"[F006][STAGE_05RC][job_id={job_id}] 오디오 없음 - 슬라이드당 5.0초 기본값"
                 )
         else:
             durations = {}
@@ -211,21 +209,23 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
                 has_subtitles = True
                 subtitle_file_path = srt_file_path
                 logger.info(
-                    f"[F006][STAGE_05RA][job_id={job_id}] SRT 파싱 완료 - "
+                    f"[F006][STAGE_05RC][job_id={job_id}] SRT 파싱 완료 - "
                     f"{len(srt_entries)}개 항목"
                 )
 
         # ----------------------------------------------------------------
-        # 5. remotion_props_a.json 구성 및 저장
+        # 5. remotion_props_c.json 구성 및 저장
         # ----------------------------------------------------------------
         job_dir: Path = _PROJECT_ROOT / "storage" / "results" / "f006" / str(job_id)
         job_dir.mkdir(parents=True, exist_ok=True)
 
+        # slides 데이터 구성 - duration_sec 추가
         slides_data: list[dict] = []
         for i, slide in enumerate(slide_json_data):
             duration_sec: float = round(durations.get(i, 5.0), 3)
             slides_data.append({**slide, "duration_sec": duration_sec})
 
+        # 오디오 경로 - job_dir 기준 상대 경로 (staticFile 대응)
         audio_path_normalized: str = ""
         if audio_file_path:
             try:
@@ -244,12 +244,12 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             "transition_mode": transition_mode,
         }
 
-        # remotion_props_a.json 저장 (stage05r_remotion_b.py의 remotion_props_b.json과 구분)
-        props_json_path: Path = job_dir / "remotion_props_a.json"
+        # remotion_props_c.json 저장 (다른 모드 props 파일과 구분)
+        props_json_path: Path = job_dir / "remotion_props_c.json"
         with open(props_json_path, "w", encoding="utf-8") as f:
             json.dump(remotion_props, f, ensure_ascii=False, indent=2)
         logger.info(
-            f"[F006][STAGE_05RA][job_id={job_id}] remotion_props_a.json 저장: {props_json_path}"
+            f"[F006][STAGE_05RC][job_id={job_id}] remotion_props_c.json 저장: {props_json_path}"
         )
 
         # ----------------------------------------------------------------
@@ -257,7 +257,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         # ----------------------------------------------------------------
         if not (_REMOTION_DIR / "node_modules").exists():
             logger.info(
-                f"[F006][STAGE_05RA][job_id={job_id}] node_modules 없음 - npm install 실행"
+                f"[F006][STAGE_05RC][job_id={job_id}] node_modules 없음 - npm install 실행"
             )
             try:
                 npm_result = subprocess.run(
@@ -271,28 +271,26 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
                 )
                 if npm_result.returncode != 0:
                     logger.error(
-                        f"[F006][STAGE_05RA][job_id={job_id}] npm install 실패: "
+                        f"[F006][STAGE_05RC][job_id={job_id}] npm install 실패: "
                         f"{npm_result.stderr[:300]}"
                     )
                     raise RuntimeError(
                         f"npm install 실패 (exit code {npm_result.returncode}): "
                         f"{npm_result.stderr[:200]}"
                     )
-                logger.info(
-                    f"[F006][STAGE_05RA][job_id={job_id}] npm install 완료"
-                )
+                logger.info(f"[F006][STAGE_05RC][job_id={job_id}] npm install 완료")
             except subprocess.TimeoutExpired as e:
                 logger.error(
-                    f"[F006][STAGE_05RA][job_id={job_id}] npm install 타임아웃 (300초)"
+                    f"[F006][STAGE_05RC][job_id={job_id}] npm install 타임아웃 (300초)"
                 )
                 raise RuntimeError("npm install 타임아웃 (300초)") from e
         else:
             logger.info(
-                f"[F006][STAGE_05RA][job_id={job_id}] node_modules 존재 - npm install 생략"
+                f"[F006][STAGE_05RC][job_id={job_id}] node_modules 존재 - npm install 생략"
             )
 
         # ----------------------------------------------------------------
-        # 7. remotion render 실행 (컴포지션: F006VideoA)
+        # 7. remotion render 실행 (컴포지션: F006VideoC)
         # ----------------------------------------------------------------
         output_final_dir: Path = job_dir / "final"
         output_final_dir.mkdir(parents=True, exist_ok=True)
@@ -310,7 +308,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         ]
 
         logger.info(
-            f"[F006][STAGE_05RA][job_id={job_id}] remotion render 시작 - "
+            f"[F006][STAGE_05RC][job_id={job_id}] remotion render 시작 - "
             f"컴포지션={_COMPOSITION_ID}, 출력={output_video_path}"
         )
         try:
@@ -325,7 +323,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             )
             if render_result.returncode != 0:
                 logger.error(
-                    f"[F006][STAGE_05RA][job_id={job_id}] remotion render 실패: "
+                    f"[F006][STAGE_05RC][job_id={job_id}] remotion render 실패: "
                     f"{render_result.stderr[:400]}"
                 )
                 raise RuntimeError(
@@ -333,11 +331,11 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
                     f"{render_result.stderr[:300]}"
                 )
             logger.info(
-                f"[F006][STAGE_05RA][job_id={job_id}] remotion render 완료: {output_video_path}"
+                f"[F006][STAGE_05RC][job_id={job_id}] remotion render 완료: {output_video_path}"
             )
         except subprocess.TimeoutExpired as e:
             logger.error(
-                f"[F006][STAGE_05RA][job_id={job_id}] remotion render 타임아웃 (900초)"
+                f"[F006][STAGE_05RC][job_id={job_id}] remotion render 타임아웃 (900초)"
             )
             raise RuntimeError("remotion render 타임아웃 (900초)") from e
 
@@ -358,9 +356,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             thumbnail_path,
         ]
 
-        logger.info(
-            f"[F006][STAGE_05RA][job_id={job_id}] remotion still (썸네일) 시작"
-        )
+        logger.info(f"[F006][STAGE_05RC][job_id={job_id}] remotion still (썸네일) 시작")
         try:
             still_result = subprocess.run(
                 cmd_still,
@@ -372,17 +368,18 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
                 timeout=180,
             )
             if still_result.returncode != 0:
+                # 썸네일 실패는 치명적이지 않음 - 경고 후 계속 진행
                 logger.warning(
-                    f"[F006][STAGE_05RA][job_id={job_id}] remotion still 실패 (무시): "
+                    f"[F006][STAGE_05RC][job_id={job_id}] remotion still 실패 (무시): "
                     f"{still_result.stderr[:200]}"
                 )
             else:
                 logger.info(
-                    f"[F006][STAGE_05RA][job_id={job_id}] remotion still 완료: {thumbnail_path}"
+                    f"[F006][STAGE_05RC][job_id={job_id}] remotion still 완료: {thumbnail_path}"
                 )
         except subprocess.TimeoutExpired:
             logger.warning(
-                f"[F006][STAGE_05RA][job_id={job_id}] remotion still 타임아웃 (180초) - 무시"
+                f"[F006][STAGE_05RC][job_id={job_id}] remotion still 타임아웃 (180초) - 무시"
             )
 
         # ----------------------------------------------------------------
@@ -393,12 +390,13 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         if output_file.exists():
             file_size_mb = round(output_file.stat().st_size / 1024 / 1024, 2)
 
+        # 영상 길이는 슬라이드 duration_sec 합계로 추정
         total_duration: float = round(
             sum(s.get("duration_sec", 5.0) for s in slides_data), 1
         )
 
         logger.info(
-            f"[F006][STAGE_05RA][job_id={job_id}] 렌더링 완료 - "
+            f"[F006][STAGE_05RC][job_id={job_id}] 렌더링 완료 - "
             f"{file_size_mb}MB, {total_duration}초, 자막: {has_subtitles}"
         )
 
@@ -412,7 +410,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             "file_size_mb": file_size_mb,
             "has_subtitles": has_subtitles,
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "renderer": "remotion_a",
+            "renderer": "remotion_c",
         }
 
     def validate_output(self, output: dict) -> ValidationResult:
@@ -424,13 +422,13 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         if not video_path:
             return ValidationResult(
                 is_valid=False,
-                rejection_reason="STAGE_05RA video_file_path 없음 - Remotion native 렌더링 실패. 재시도하세요.",
+                rejection_reason="STAGE_05RC video_file_path 없음 - Remotion fluid_bg 렌더링 실패. 재시도하세요.",
                 rejection_target="STAGE_05_EDIT",
             )
         if not Path(video_path).exists():
             return ValidationResult(
                 is_valid=False,
-                rejection_reason=f"STAGE_05RA 출력 파일 없음: {video_path}. 재시도하세요.",
+                rejection_reason=f"STAGE_05RC 출력 파일 없음: {video_path}. 재시도하세요.",
                 rejection_target="STAGE_05_EDIT",
             )
         return ValidationResult(is_valid=True)
@@ -440,7 +438,11 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
     # ------------------------------------------------------------------
 
     def _get_audio_duration_sec(self, audio_path: str) -> float:
-        """오디오 파일 실제 재생 길이(초)를 반환."""
+        """오디오 파일 실제 재생 길이(초)를 반환.
+
+        moviepy AudioFileClip으로 측정하며 실패 시 ffprobe로 폴백.
+        둘 다 실패하면 0.0 반환.
+        """
         if not Path(audio_path).exists():
             return 0.0
         try:
@@ -450,7 +452,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             ac.close()
             return dur
         except Exception as e:
-            logger.warning(f"[F006][STAGE_05RA] moviepy 오디오 길이 측정 실패: {e}")
+            logger.warning(f"[F006][STAGE_05RC] moviepy 오디오 길이 측정 실패: {e}")
         try:
             ffmpeg_exe: str = _imageio_ffmpeg.get_ffmpeg_exe()
             ffprobe_exe: str = ffmpeg_exe.replace("ffmpeg.exe", "ffprobe.exe").replace(
@@ -469,7 +471,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             dur = float(data.get("format", {}).get("duration", 0))
             return dur
         except Exception as e:
-            logger.warning(f"[F006][STAGE_05RA] ffprobe 오디오 길이 측정 실패: {e}")
+            logger.warning(f"[F006][STAGE_05RC] ffprobe 오디오 길이 측정 실패: {e}")
         return 0.0
 
     def _distribute_duration_by_narration(
@@ -477,7 +479,11 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
         slides: list[dict],
         audio_duration: float,
     ) -> dict[int, float]:
-        """각 슬라이드의 narration 글자 수에 비례해 표시 시간 배분."""
+        """각 슬라이드의 narration 글자 수에 비례해 표시 시간 배분.
+
+        반환값: {슬라이드 인덱스: duration_sec} (인덱스 기반 키)
+        2-pass 알고리즘 - stage05r_remotion_b.py와 동일 로직.
+        """
         min_dur = 3.0
         n = len(slides)
 
@@ -491,13 +497,12 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
 
         floor_indices = [i for i, d in enumerate(raw) if d < min_dur]
         non_floor_indices = [i for i, d in enumerate(raw) if d >= min_dur]
-
         floor_total = len(floor_indices) * min_dur
 
         if floor_total >= audio_duration:
             per_slide = audio_duration / n
             logger.warning(
-                f"[F006][STAGE_05RA] min {min_dur}s 보장으로 audio_duration({audio_duration:.1f}s) "
+                f"[F006][STAGE_05RC] min {min_dur}s 보장으로 audio_duration({audio_duration:.1f}s) "
                 f"초과 - 균등 배분 폴백 ({per_slide:.1f}s/슬라이드)"
             )
             return {i: per_slide for i in range(n)}
@@ -514,7 +519,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
 
         if floor_indices:
             logger.info(
-                f"[F006][STAGE_05RA] min {min_dur}s 클램핑 발동: {len(floor_indices)}개 슬라이드, "
+                f"[F006][STAGE_05RC] min {min_dur}s 클램핑 발동: {len(floor_indices)}개 슬라이드, "
                 f"나머지 {len(non_floor_indices)}개에 {remaining:.1f}s 재배분"
             )
 
@@ -526,7 +531,7 @@ class Stage05rRemotionA(BaseStage, BasePipeline):
             with open(srt_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except Exception as e:
-            logger.warning(f"[F006][STAGE_05RA] SRT 파일 읽기 실패: {srt_path} - {e}")
+            logger.warning(f"[F006][STAGE_05RC] SRT 파일 읽기 실패: {srt_path} - {e}")
             return []
 
         entries: list[dict] = []

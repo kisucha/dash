@@ -3,6 +3,7 @@ import React from "react";
 import {
   AbsoluteFill,
   Audio,
+  Img,
   interpolate,
   staticFile,
   useCurrentFrame,
@@ -72,6 +73,8 @@ export interface SlideDataB {
   body_text: string;
   /** accent 색상으로 강조할 키워드 목록 */
   keywords: string[];
+  /** 차트 PNG 상대 경로 (--public-dir 기준, 없으면 빈 문자열) */
+  chart_path?: string;
   /** 이 슬라이드의 표시 시간(초) */
   duration_sec: number;
 }
@@ -84,6 +87,8 @@ export interface F006VideoBProps {
   srt_entries: SRTEntry[];
   /** 채널명 (상단 바에 표시) */
   channel_name: string;
+  /** 종목 표시 라벨 — "삼성전자(005930)" 형식, 없으면 빈 문자열 */
+  ticker_label?: string;
   /** 테마 이름 (dark_blue / warm_gray / clean_white) */
   theme: string;
   /** 전환 모드 (auto / fade_only / slide_only) */
@@ -228,6 +233,7 @@ interface SlideRendererBProps {
   slide: SlideDataB;
   colors: ThemeColorSet;
   channelName: string;
+  tickerLabel: string;
   totalDuration: number;
 }
 
@@ -235,6 +241,7 @@ const SlideRendererB: React.FC<SlideRendererBProps> = ({
   slide,
   colors,
   channelName,
+  tickerLabel,
   totalDuration,
 }) => {
   const frame = useCurrentFrame();
@@ -244,7 +251,7 @@ const SlideRendererB: React.FC<SlideRendererBProps> = ({
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const headerTranslateY = interpolate(frame, [0, 15], [-20, 0], {
+  const headerTranslateY = interpolate(frame, [0, 15], [-30, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -254,7 +261,7 @@ const SlideRendererB: React.FC<SlideRendererBProps> = ({
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const bodyTranslateY = interpolate(frame, [8, 25], [15, 0], {
+  const bodyTranslateY = interpolate(frame, [8, 25], [23, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -262,15 +269,15 @@ const SlideRendererB: React.FC<SlideRendererBProps> = ({
   // 슬라이드 타입별 폰트 크기 설정
   const headerFontSize =
     slide.type === "title"
-      ? 60
+      ? 90
       : slide.type === "content"
-      ? 38
+      ? 57
       : slide.type === "summary"
-      ? 36
+      ? 54
       : 0; // quote는 헤더 없음
 
   const bodyFontSize =
-    slide.type === "quote" ? 32 : 22;
+    slide.type === "quote" ? 48 : 39;
 
   const showHeader = slide.type !== "quote" && slide.header;
   const showBody =
@@ -281,176 +288,258 @@ const SlideRendererB: React.FC<SlideRendererBProps> = ({
       {/* 애니메이션 그라디언트 배경 */}
       <GradientBackground colors={colors} totalDuration={totalDuration} />
 
-      {/* 상단 채널명 바 — 높이 40px */}
+      {/* 상단 바 — title/summary는 채널명 숨김, 나머지는 채널명|종목|제목 표시 */}
       <div
         style={{
           position: "absolute",
           top: 0,
           left: 0,
           right: 0,
-          height: 40,
+          height: 60,
           background: colors.bar,
           display: "flex",
           alignItems: "center",
-          paddingLeft: 24,
+          paddingLeft: 36,
           zIndex: 10,
         }}
       >
-        <span
-          style={{
-            color: colors.sub,
-            fontSize: 14,
-            fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-            fontWeight: 600,
-            letterSpacing: 1.5,
-            textTransform: "uppercase",
-          }}
-        >
-          {channelName}
-        </span>
+        {slide.type !== "title" && slide.type !== "summary" && (
+          <span
+            style={{
+              color: colors.sub,
+              fontSize: 22,
+              fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
+              fontWeight: 600,
+              overflow: "hidden",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {[channelName, tickerLabel, slide.header].filter(Boolean).join(" | ")}
+          </span>
+        )}
       </div>
 
-      {/* 콘텐츠 영역 — 상단 바(40px)와 하단 바(48px) 사이 */}
-      <div
-        style={{
-          position: "absolute",
-          top: 40,
-          left: 0,
-          right: 0,
-          bottom: 48,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          alignItems: slide.type === "quote" ? "center" : "flex-start",
-          padding: "32px 64px",
-          gap: 24,
-        }}
-      >
-        {/* 헤더 텍스트 */}
-        {showHeader && (
+      {/* 콘텐츠 영역 — content+chart: 좌우 분할 / 그 외: 기존 단일 컬럼 */}
+      {slide.type === "content" && slide.chart_path ? (
+        // 차트 있는 content 슬라이드: 텍스트(50%) + 차트(48%) 가로 분할
+        <div
+          style={{
+            position: "absolute",
+            top: 60,
+            left: 0,
+            right: 0,
+            bottom: 72,
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "center",
+            padding: "42px 60px",
+            gap: 30,
+          }}
+        >
+          {/* 텍스트 섹션 */}
           <div
             style={{
-              opacity: headerOpacity,
-              transform: `translateY(${headerTranslateY}px)`,
-              color: colors.header,
-              fontSize: headerFontSize,
-              fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-              fontWeight: 800,
-              lineHeight: 1.3,
-              textAlign: slide.type === "title" ? "center" : "left",
-              width: "100%",
+              flex: "0 0 50%",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              gap: 30,
             }}
           >
-            {slide.header}
-          </div>
-        )}
-
-        {/* summary 타입 구분선 */}
-        {slide.type === "summary" && showHeader && (
-          <div
-            style={{
-              width: 80,
-              height: 3,
-              background: colors.accent,
-              opacity: headerOpacity,
-              borderRadius: 2,
-            }}
-          />
-        )}
-
-        {/* 본문 텍스트 */}
-        {showBody && slide.body_text && (
-          <div
-            style={{
-              opacity: bodyOpacity,
-              transform: `translateY(${bodyTranslateY}px)`,
-              width: "100%",
-            }}
-          >
-            {/* quote 타입: italic + 인용 기호 */}
-            {slide.type === "quote" ? (
+            {showHeader && (
               <div
                 style={{
-                  color: colors.text,
-                  fontSize: bodyFontSize,
+                  opacity: headerOpacity,
+                  transform: `translateY(${headerTranslateY}px)`,
+                  color: colors.header,
+                  fontSize: headerFontSize,
                   fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-                  fontStyle: "italic",
-                  fontWeight: 400,
-                  lineHeight: 1.7,
-                  textAlign: "center",
-                  position: "relative",
-                  padding: "0 48px",
+                  fontWeight: 800,
+                  lineHeight: 1.3,
                 }}
               >
-                <span
-                  style={{
-                    position: "absolute",
-                    left: 0,
-                    top: -16,
-                    fontSize: 80,
-                    color: colors.accent,
-                    opacity: 0.4,
-                    fontFamily: "Georgia, serif",
-                    lineHeight: 1,
-                  }}
-                >
-                  "
-                </span>
+                {slide.header}
+              </div>
+            )}
+            {showBody && slide.body_text && (
+              <div
+                style={{
+                  opacity: bodyOpacity,
+                  transform: `translateY(${bodyTranslateY}px)`,
+                }}
+              >
                 <HighlightedText
                   text={slide.body_text}
                   keywords={slide.keywords}
                   accentColor={colors.accent}
-                  baseStyle={{}}
+                  baseStyle={{
+                    color: colors.text,
+                    fontSize: bodyFontSize,
+                    fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
+                    fontWeight: 600,
+                    lineHeight: 1.8,
+                    display: "block",
+                    WebkitFontSmoothing: "antialiased",
+                    MozOsxFontSmoothing: "grayscale",
+                    textRendering: "geometricPrecision",
+                  }}
                 />
               </div>
-            ) : (
-              /* title / content / summary 타입 */
-              <HighlightedText
-                text={slide.body_text}
-                keywords={slide.keywords}
-                accentColor={colors.accent}
-                baseStyle={{
-                  color: colors.text,
-                  fontSize: bodyFontSize,
-                  fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-                  fontWeight: 400,
-                  lineHeight: 1.8,
-                  display: "block",
-                }}
-              />
             )}
           </div>
-        )}
-      </div>
+          {/* 차트 이미지 섹션 */}
+          <div
+            style={{
+              flex: "0 0 48%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: bodyOpacity,
+            }}
+          >
+            <Img
+              src={staticFile(slide.chart_path)}
+              style={{
+                width: "100%",
+                height: "auto",
+                maxHeight: 750,
+                borderRadius: 12,
+                objectFit: "contain",
+              }}
+            />
+          </div>
+        </div>
+      ) : (
+        // 기존 단일 컬럼 레이아웃 (title / summary / quote / chart 없는 content)
+        <div
+          style={{
+            position: "absolute",
+            top: 60,
+            left: 0,
+            right: 0,
+            bottom: 72,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: slide.type === "quote" ? "center" : "flex-start",
+            padding: "48px 96px",
+            gap: 36,
+          }}
+        >
+          {/* 헤더 텍스트 */}
+          {showHeader && (
+            <div
+              style={{
+                opacity: headerOpacity,
+                transform: `translateY(${headerTranslateY}px)`,
+                color: colors.header,
+                fontSize: headerFontSize,
+                fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
+                fontWeight: 800,
+                lineHeight: 1.3,
+                textAlign: slide.type === "title" ? "center" : "left",
+                width: "100%",
+              }}
+            >
+              {slide.header}
+            </div>
+          )}
 
-      {/* 하단 브랜딩 바 — 높이 48px */}
+          {/* summary 타입 구분선 */}
+          {slide.type === "summary" && showHeader && (
+            <div
+              style={{
+                width: 120,
+                height: 5,
+                background: colors.accent,
+                opacity: headerOpacity,
+                borderRadius: 3,
+              }}
+            />
+          )}
+
+          {/* 본문 텍스트 */}
+          {showBody && slide.body_text && (
+            <div
+              style={{
+                opacity: bodyOpacity,
+                transform: `translateY(${bodyTranslateY}px)`,
+                width: "100%",
+              }}
+            >
+              {slide.type === "quote" ? (
+                <div
+                  style={{
+                    color: colors.text,
+                    fontSize: bodyFontSize,
+                    fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
+                    fontStyle: "italic",
+                    fontWeight: 500,
+                    lineHeight: 1.7,
+                    textAlign: "center",
+                    position: "relative",
+                    padding: "0 72px",
+                    WebkitFontSmoothing: "antialiased",
+                    MozOsxFontSmoothing: "grayscale",
+                    textRendering: "geometricPrecision",
+                  }}
+                >
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      top: -24,
+                      fontSize: 120,
+                      color: colors.accent,
+                      opacity: 0.4,
+                      fontFamily: "Georgia, serif",
+                      lineHeight: 1,
+                    }}
+                  >
+                    "
+                  </span>
+                  <HighlightedText
+                    text={slide.body_text}
+                    keywords={slide.keywords}
+                    accentColor={colors.accent}
+                    baseStyle={{}}
+                  />
+                </div>
+              ) : (
+                <HighlightedText
+                  text={slide.body_text}
+                  keywords={slide.keywords}
+                  accentColor={colors.accent}
+                  baseStyle={{
+                    color: colors.text,
+                    fontSize: bodyFontSize,
+                    fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
+                    fontWeight: 600,
+                    lineHeight: 1.8,
+                    display: "block",
+                    WebkitFontSmoothing: "antialiased",
+                    MozOsxFontSmoothing: "grayscale",
+                    textRendering: "geometricPrecision",
+                  }}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 하단 바 — 높이 72px */}
       <div
         style={{
           position: "absolute",
           bottom: 0,
           left: 0,
           right: 0,
-          height: 48,
+          height: 72,
           background: colors.bar,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          paddingRight: 24,
           zIndex: 10,
         }}
-      >
-        <span
-          style={{
-            color: colors.accent,
-            fontSize: 13,
-            fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-            fontWeight: 700,
-            letterSpacing: 0.5,
-          }}
-        >
-          {channelName}
-        </span>
-      </div>
+      />
     </AbsoluteFill>
   );
 };
@@ -490,7 +579,7 @@ const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       style={{
         justifyContent: "flex-end",
         alignItems: "center",
-        paddingBottom: 68,
+        paddingBottom: 102,
         pointerEvents: "none",
       }}
     >
@@ -498,12 +587,12 @@ const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
         style={{
           background: "rgba(0,0,0,0.65)",
           color: "#FFFFFF",
-          fontSize: 28,
+          fontSize: 42,
           fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
           fontWeight: 500,
-          textShadow: "1px 1px 3px rgba(0,0,0,0.9)",
-          padding: "8px 20px",
-          borderRadius: 6,
+          textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+          padding: "12px 30px",
+          borderRadius: 9,
           textAlign: "center",
           maxWidth: "80%",
           lineHeight: 1.5,
@@ -523,6 +612,7 @@ export const F006VideoB: React.FC<F006VideoBProps> = ({
   audio_path,
   srt_entries,
   channel_name,
+  ticker_label,
   theme,
   transition_mode,
 }) => {
@@ -566,6 +656,7 @@ export const F006VideoB: React.FC<F006VideoBProps> = ({
                     slide={slideItem}
                     colors={colors}
                     channelName={channel_name}
+                    tickerLabel={ticker_label ?? ""}
                     totalDuration={totalFrames}
                   />
                 </AbsoluteFill>

@@ -66,6 +66,38 @@ TICKER_MAP: dict[str, str] = {
 }
 
 
+def _has_korean(text: str) -> bool:
+    """문자열에 한글 음절이 포함되면 True를 반환한다."""
+    return any('가' <= c <= '힣' for c in text)
+
+
+# 영문 대문자 2-5자 패턴이 주식 티커로 오탐되는 일반 금융/기술 용어 제외 목록
+_TICKER_EXCLUSIONS: frozenset = frozenset({
+    "RSI", "MACD", "EMA", "SMA", "MA", "ADX", "DMI", "ATR", "BB", "IV",
+    "PE", "PER", "ROE", "ROA", "EPS", "PBR", "GDP", "CPI", "PPI", "CCI",
+    "AI", "IT", "US", "USD", "KR", "JP", "EU", "ETF", "IPO", "QE",
+    "FED", "SEC", "YTD", "YOY", "DCA", "DXY", "VIX", "OBV", "EV",
+})
+
+# 역방향 맵: ticker -> 대표 표시명 (동일 ticker 복수 키 중 가장 긴 이름 선택)
+_REVERSE_TICKER: dict[str, str] = {}
+for _n, _t in TICKER_MAP.items():
+    if _t not in _REVERSE_TICKER or len(_n) > len(_REVERSE_TICKER[_t]):
+        _REVERSE_TICKER[_t] = _n
+
+
+def format_ticker_display(ticker: str) -> str:
+    """ticker 문자열을 '종목명(코드)' 형식으로 반환한다.
+
+    예: '005930.KS' -> '삼성전자(005930)', 'AAPL' -> 'AAPL', '' -> ''
+    """
+    if not ticker:
+        return ""
+    name = _REVERSE_TICKER.get(ticker, "")
+    code = ticker.split(".")[0].split("-")[0]
+    return f"{name}({code})" if name else ticker
+
+
 def detect_indicators(text: str) -> list[str]:
     """슬라이드 텍스트에서 기술 지표 키워드를 감지해 우선순위 순으로 반환한다.
 
@@ -106,8 +138,12 @@ def extract_ticker(topic: str, user_context: str = "") -> Optional[str]:
     """
     search_text = topic + " " + user_context
 
-    # 1. TICKER_MAP 직접 매칭 (긴 키 우선 - '삼성전자'가 '삼성'보다 우선)
-    sorted_keys = sorted(TICKER_MAP.keys(), key=len, reverse=True)
+    # 1. TICKER_MAP 직접 매칭 — 한글 키를 영문 키보다 우선 체크 (오탐 방지)
+    # 예: '삼성전자'(한글, len=4)가 'NAVER'(영문, len=5)보다 먼저 검색됨
+    sorted_keys = sorted(
+        TICKER_MAP.keys(),
+        key=lambda k: (0 if _has_korean(k) else 1, -len(k))
+    )
     for key in sorted_keys:
         if key.lower() in search_text.lower():
             return TICKER_MAP[key]
@@ -117,9 +153,9 @@ def extract_ticker(topic: str, user_context: str = "") -> Optional[str]:
     if kr_match:
         return f"{kr_match.group(1)}.KS"
 
-    # 3. 영문 대문자 2-5자 티커 패턴 (AAPL, MSFT, BTC 등)
+    # 3. 영문 대문자 2-5자 티커 패턴 (AAPL, MSFT 등) — 일반 금융/기술 용어 제외
     en_match = re.search(r'\b([A-Z]{2,5})\b', search_text)
-    if en_match:
+    if en_match and en_match.group(1) not in _TICKER_EXCLUSIONS:
         return en_match.group(1)
 
     return None
@@ -160,7 +196,7 @@ class ChartGenerator:
         ticker: str,
         indicators: list[str],
         output_path: str,
-        period: str = "3mo",
+        period: str = "6mo",
         chart_size: tuple = (520, 540),
     ) -> bool:
         """yfinance 데이터 수집 후 indicators 기반 차트를 PNG로 저장한다.
@@ -496,12 +532,14 @@ class ChartGenerator:
         """이동평균 - 단일 axes, 종가+MA20(노랑)+MA60(주황)+MA120(빨강)."""
         import matplotlib.pyplot as plt
 
+        ma5 = close.rolling(5).mean()
         ma20 = close.rolling(20).mean()
         ma60 = close.rolling(60).mean()
         ma120 = close.rolling(120).mean()
 
         fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
         ax.plot(close.index, close, color=text_hex, linewidth=1.2, label="종가")
+        ax.plot(close.index, ma5, color="#00e5ff", linewidth=0.9, label="MA5")
         ax.plot(close.index, ma20, color="yellow", linewidth=0.9, label="MA20")
         ax.plot(close.index, ma60, color="orange", linewidth=0.9, label="MA60")
         ax.plot(close.index, ma120, color="red", linewidth=0.9, label="MA120")

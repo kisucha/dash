@@ -3,6 +3,7 @@ import React from "react";
 import {
   AbsoluteFill,
   Audio,
+  Img,
   interpolate,
   staticFile,
   useCurrentFrame,
@@ -27,6 +28,8 @@ export interface F006VideoAProps {
   audio_path: string;
   srt_entries: SRTEntry[];
   channel_name: string;
+  /** 종목 표시 라벨 — "삼성전자(005930)" 형식, 없으면 빈 문자열 */
+  ticker_label?: string;
   theme: string;
   transition_mode: string;
 }
@@ -275,6 +278,7 @@ interface SlideRendererAProps {
   slide: SlideDataB;
   colors: ThemeColorSet;
   channelName: string;
+  tickerLabel: string;
   totalDuration: number;
 }
 
@@ -282,6 +286,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
   slide,
   colors,
   channelName,
+  tickerLabel,
   totalDuration,
 }) => {
   const frame = useCurrentFrame();
@@ -291,7 +296,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const headerTranslateY = interpolate(frame, [0, 15], [-20, 0], {
+  const headerTranslateY = interpolate(frame, [0, 15], [-30, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -301,10 +306,16 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const bodyTranslateY = interpolate(frame, [8, 25], [15, 0], {
+  const bodyTranslateY = interpolate(frame, [8, 25], [23, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
+
+  // title/summary: 상단 바 비움 / 나머지: 채널명|종목|제목 조합
+  const topBarLabel: string =
+    (slide.type === "title" || slide.type === "summary")
+      ? ""
+      : [channelName, tickerLabel, slide.header].filter(Boolean).join(" | ");
 
   // title 타입: 중앙 전체 레이아웃
   if (slide.type === "title") {
@@ -312,21 +323,21 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
       <AbsoluteFill>
         <GradientBackground colors={colors} totalDuration={totalDuration} />
         {/* 상단 채널명 바 */}
-        <TopBar colors={colors} channelName={channelName} />
+        <TopBar colors={colors} channelName={topBarLabel} />
         {/* 중앙 정렬 제목 */}
         <div
           style={{
             position: "absolute",
-            top: 40,
+            top: 60,
             left: 0,
             right: 0,
-            bottom: 48,
+            bottom: 72,
             display: "flex",
             flexDirection: "column",
             justifyContent: "center",
             alignItems: "center",
-            padding: "32px 64px",
-            gap: 20,
+            padding: "48px 96px",
+            gap: 30,
           }}
         >
           <div
@@ -334,7 +345,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
               opacity: headerOpacity,
               transform: `translateY(${headerTranslateY}px)`,
               color: colors.header,
-              fontSize: 60,
+              fontSize: 90,
               fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
               fontWeight: 800,
               lineHeight: 1.3,
@@ -349,7 +360,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
                 opacity: bodyOpacity,
                 transform: `translateY(${bodyTranslateY}px)`,
                 color: colors.sub,
-                fontSize: 22,
+                fontSize: 33,
                 fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
                 fontWeight: 400,
                 textAlign: "center",
@@ -369,18 +380,18 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
     return (
       <AbsoluteFill>
         <GradientBackground colors={colors} totalDuration={totalDuration} />
-        <TopBar colors={colors} channelName={channelName} />
+        <TopBar colors={colors} channelName={topBarLabel} />
         <div
           style={{
             position: "absolute",
-            top: 40,
+            top: 60,
             left: 0,
             right: 0,
-            bottom: 48,
+            bottom: 72,
             display: "flex",
             justifyContent: "center",
             alignItems: "center",
-            padding: "32px 80px",
+            padding: "48px 120px",
           }}
         >
           <div
@@ -388,22 +399,22 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
               opacity: bodyOpacity,
               transform: `translateY(${bodyTranslateY}px)`,
               color: colors.text,
-              fontSize: 32,
+              fontSize: 48,
               fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
               fontStyle: "italic",
               fontWeight: 400,
               lineHeight: 1.7,
               textAlign: "center",
               position: "relative",
-              padding: "0 48px",
+              padding: "0 72px",
             }}
           >
             <span
               style={{
                 position: "absolute",
                 left: 0,
-                top: -16,
-                fontSize: 80,
+                top: -24,
+                fontSize: 120,
                 color: colors.accent,
                 opacity: 0.4,
                 fontFamily: "Georgia, serif",
@@ -451,14 +462,14 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
     return (
       <AbsoluteFill>
         <GradientBackground colors={colors} totalDuration={totalDuration} />
-        <TopBar colors={colors} channelName={channelName} />
+        <TopBar colors={colors} channelName={topBarLabel} />
         <div
           style={{
             position: "absolute",
-            top: 40,
+            top: 60,
             left: 0,
             right: 0,
-            bottom: 48,
+            bottom: 72,
             display: "flex",
             flexDirection: "row",
           }}
@@ -472,8 +483,8 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
               justifyContent: "center",
               alignItems: "center",
               borderRight: `2px solid ${colors.accent}`,
-              padding: "32px 24px",
-              gap: 12,
+              padding: "48px 36px",
+              gap: 18,
             }}
           >
             <div
@@ -481,7 +492,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
                 opacity: headerOpacity,
                 transform: `translateY(${headerTranslateY}px)`,
                 color: colors.sub,
-                fontSize: 16,
+                fontSize: 24,
                 fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
                 fontWeight: 600,
                 letterSpacing: 1,
@@ -496,7 +507,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
                 style={{
                   opacity: bodyOpacity,
                   color: colors.accent,
-                  fontSize: 64,
+                  fontSize: 96,
                   fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
                   fontWeight: 900,
                   lineHeight: 1.1,
@@ -524,11 +535,11 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
                     style={{
                       background: `${colors.accent}22`,
                       color: colors.accent,
-                      fontSize: 14,
+                      fontSize: 21,
                       fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
                       fontWeight: 600,
-                      padding: "4px 12px",
-                      borderRadius: 20,
+                      padding: "6px 18px",
+                      borderRadius: 30,
                       border: `1px solid ${colors.accent}66`,
                     }}
                   >
@@ -546,7 +557,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
               display: "flex",
               flexDirection: "column",
               justifyContent: "center",
-              padding: "32px 40px",
+              padding: "48px 60px",
             }}
           >
             <div
@@ -561,7 +572,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
                 accentColor={colors.accent}
                 baseStyle={{
                   color: colors.text,
-                  fontSize: 22,
+                  fontSize: 33,
                   fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
                   fontWeight: 400,
                   lineHeight: 1.8,
@@ -586,14 +597,14 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
   return (
     <AbsoluteFill>
       <GradientBackground colors={colors} totalDuration={totalDuration} />
-      <TopBar colors={colors} channelName={channelName} />
+      <TopBar colors={colors} channelName={topBarLabel} />
       <div
         style={{
           position: "absolute",
-          top: 40,
+          top: 60,
           left: 0,
           right: 0,
-          bottom: 48,
+          bottom: 72,
           display: "flex",
           flexDirection: "row",
         }}
@@ -607,8 +618,8 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
             justifyContent: "center",
             alignItems: "flex-start",
             borderRight: `2px solid ${colors.accent}`,
-            padding: "32px 32px 32px 40px",
-            gap: 16,
+            padding: "48px 48px 48px 60px",
+            gap: 24,
           }}
         >
           <div
@@ -616,7 +627,7 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
               opacity: headerOpacity,
               transform: `translateY(${headerTranslateY}px)`,
               color: colors.header,
-              fontSize: 36,
+              fontSize: 54,
               fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
               fontWeight: 800,
               lineHeight: 1.3,
@@ -626,11 +637,11 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
           </div>
           <div
             style={{
-              width: 60,
-              height: 3,
+              width: 90,
+              height: 5,
               background: colors.accent,
               opacity: headerOpacity,
-              borderRadius: 2,
+              borderRadius: 3,
             }}
           />
           {slide.keywords.length > 0 && (
@@ -648,11 +659,11 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
                   style={{
                     background: `${colors.accent}22`,
                     color: colors.accent,
-                    fontSize: 14,
+                    fontSize: 21,
                     fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
                     fontWeight: 600,
-                    padding: "4px 12px",
-                    borderRadius: 20,
+                    padding: "6px 18px",
+                    borderRadius: 30,
                     border: `1px solid ${colors.accent}66`,
                   }}
                 >
@@ -663,71 +674,103 @@ const SlideRendererA: React.FC<SlideRendererAProps> = ({
           )}
         </div>
 
-        {/* 우측 패널 — bullet 목록 */}
+        {/* 우측 — bullet 목록 (차트 있으면 flex row로 분할) */}
         <div
           style={{
             width: "60%",
             display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            padding: "32px 40px",
-            gap: 14,
+            flexDirection: "row",
+            alignItems: "stretch",
           }}
         >
-          {bodyLines.map((line, idx) => {
-            // 각 bullet item은 순서대로 약간 딜레이를 두고 등장
-            const lineDelay = 8 + idx * 6;
-            const lineOpacity = interpolate(
-              frame,
-              [lineDelay, lineDelay + 15],
-              [0, 1],
-              { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-            );
-            const lineTranslateX = interpolate(
-              frame,
-              [lineDelay, lineDelay + 15],
-              [20, 0],
-              { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-            );
+          {/* bullet 목록 영역 */}
+          <div
+            style={{
+              flex: slide.chart_path ? "0 0 48%" : "1",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              padding: "48px 36px 48px 60px",
+              gap: 21,
+            }}
+          >
+            {bodyLines.map((line, idx) => {
+              const lineDelay = 8 + idx * 6;
+              const lineOpacity = interpolate(
+                frame,
+                [lineDelay, lineDelay + 15],
+                [0, 1],
+                { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+              );
+              const lineTranslateX = interpolate(
+                frame,
+                [lineDelay, lineDelay + 15],
+                [30, 0],
+                { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
+              );
 
-            return (
-              <div
-                key={idx}
-                style={{
-                  opacity: lineOpacity,
-                  transform: `translateX(${lineTranslateX}px)`,
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 12,
-                }}
-              >
-                {/* bullet dot */}
+              return (
                 <div
+                  key={idx}
                   style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: colors.accent,
-                    marginTop: 10,
-                    flexShrink: 0,
+                    opacity: lineOpacity,
+                    transform: `translateX(${lineTranslateX}px)`,
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 18,
                   }}
-                />
-                <EnhancedText
-                  text={line}
-                  keywords={slide.keywords}
-                  accentColor={colors.accent}
-                  baseStyle={{
-                    color: colors.text,
-                    fontSize: 22,
-                    fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-                    fontWeight: 400,
-                    lineHeight: 1.6,
-                    display: "block",
-                  }}
-                />
-              </div>
-            );
-          })}
+                >
+                  <div
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      background: colors.accent,
+                      marginTop: 15,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <EnhancedText
+                    text={line}
+                    keywords={slide.keywords}
+                    accentColor={colors.accent}
+                    baseStyle={{
+                      color: colors.text,
+                      fontSize: 33,
+                      fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
+                      fontWeight: 400,
+                      lineHeight: 1.6,
+                      display: "block",
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          {/* 차트 이미지 영역 — chart_path 있을 때만 표시 */}
+          {slide.chart_path && (
+            <div
+              style={{
+                flex: "0 0 52%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "36px 36px 36px 0",
+                opacity: bodyOpacity,
+              }}
+            >
+              <Img
+                src={staticFile(slide.chart_path)}
+                style={{
+                  width: "100%",
+                  height: "auto",
+                  maxHeight: 720,
+                  borderRadius: 12,
+                  objectFit: "contain",
+                }}
+              />
+            </div>
+          )}
         </div>
       </div>
       <BottomBar colors={colors} channelName={channelName} />
@@ -749,57 +792,43 @@ const TopBar: React.FC<BarProps> = ({ colors, channelName }) => (
       top: 0,
       left: 0,
       right: 0,
-      height: 40,
+      height: 60,
       background: colors.bar,
       display: "flex",
       alignItems: "center",
-      paddingLeft: 24,
+      paddingLeft: 36,
       zIndex: 10,
     }}
   >
-    <span
-      style={{
-        color: colors.sub,
-        fontSize: 14,
-        fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-        fontWeight: 600,
-        letterSpacing: 1.5,
-        textTransform: "uppercase",
-      }}
-    >
-      {channelName}
-    </span>
+    {channelName && (
+      <span
+        style={{
+          color: colors.sub,
+          fontSize: 22,
+          fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
+          fontWeight: 600,
+          overflow: "hidden",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {channelName}
+      </span>
+    )}
   </div>
 );
 
-const BottomBar: React.FC<BarProps> = ({ colors, channelName }) => (
+const BottomBar: React.FC<BarProps> = ({ colors }) => (
   <div
     style={{
       position: "absolute",
       bottom: 0,
       left: 0,
       right: 0,
-      height: 48,
+      height: 72,
       background: colors.bar,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "flex-end",
-      paddingRight: 24,
       zIndex: 10,
     }}
-  >
-    <span
-      style={{
-        color: colors.accent,
-        fontSize: 13,
-        fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
-        fontWeight: 700,
-        letterSpacing: 0.5,
-      }}
-    >
-      {channelName}
-    </span>
-  </div>
+  />
 );
 
 // ── 자막 오버레이 ────────────────────────────────────────────────
@@ -837,7 +866,7 @@ const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
       style={{
         justifyContent: "flex-end",
         alignItems: "center",
-        paddingBottom: 68,
+        paddingBottom: 102,
         pointerEvents: "none",
       }}
     >
@@ -845,12 +874,12 @@ const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
         style={{
           background: "rgba(0,0,0,0.65)",
           color: "#FFFFFF",
-          fontSize: 28,
+          fontSize: 42,
           fontFamily: "Noto Sans KR, Malgun Gothic, sans-serif",
           fontWeight: 500,
-          textShadow: "1px 1px 3px rgba(0,0,0,0.9)",
-          padding: "8px 20px",
-          borderRadius: 6,
+          textShadow: "2px 2px 4px rgba(0,0,0,0.9)",
+          padding: "12px 30px",
+          borderRadius: 9,
           textAlign: "center",
           maxWidth: "80%",
           lineHeight: 1.5,
@@ -870,6 +899,7 @@ export const F006VideoA: React.FC<F006VideoAProps> = ({
   audio_path,
   srt_entries,
   channel_name,
+  ticker_label,
   theme,
   transition_mode,
 }) => {
@@ -907,6 +937,7 @@ export const F006VideoA: React.FC<F006VideoAProps> = ({
                     slide={slideItem}
                     colors={colors}
                     channelName={channel_name}
+                    tickerLabel={ticker_label ?? ""}
                     totalDuration={totalFrames}
                   />
                 </AbsoluteFill>

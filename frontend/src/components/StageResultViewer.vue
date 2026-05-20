@@ -107,22 +107,36 @@ function f004AssetUrl(absPath) {
   return absPath
 }
 
-// TTS 오디오 URL — f004/f001 경로 모두 변환 처리
+// 절대 경로를 /results/f006/{job_id}/... 형태 URL로 변환
+// 예: "E:\Dash\storage\results\f006\5\final\output.mp4" → "/results/f006/5/final/output.mp4"
+function f006AssetUrl(absPath) {
+  if (!absPath) return ''
+  if (absPath.startsWith('http')) return absPath
+  const normalized = absPath.replace(/\\/g, '/')
+  const marker = 'results/f006/'
+  const idx = normalized.indexOf(marker)
+  if (idx !== -1) return '/' + normalized.slice(idx)
+  return absPath
+}
+
+// TTS 오디오 URL — f006/f004/f001 경로 모두 변환 처리
 const ttsAudioUrl = computed(() => {
   const out = parsedOutput.value
   if (!out) return ''
   const path = out.audio_file_path
   if (!path) return `/results/f001/${props.jobId}/voiceover.mp3`
+  if (path.includes('results/f006') || path.includes('results\\f006')) return f006AssetUrl(path)
   if (path.includes('results/f004') || path.includes('results\\f004')) return f004AssetUrl(path)
   if (path.includes('results/f001') || path.includes('results\\f001')) return f001AssetUrl(path)
   return mediaUrl(path)
 })
 
-// 영상 편집 결과 비디오 URL — f004/f001 경로 모두 변환 처리
+// 영상 편집 결과 비디오 URL — f006/f004/f001 경로 모두 변환 처리
 const editVideoUrl = computed(() => {
   const out = parsedOutput.value
   if (!out?.video_file_path) return ''
   const path = out.video_file_path
+  if (path.includes('results/f006') || path.includes('results\\f006')) return f006AssetUrl(path)
   if (path.includes('results/f004') || path.includes('results\\f004')) return f004AssetUrl(path)
   if (path.includes('results/f001') || path.includes('results\\f001')) return f001AssetUrl(path)
   return mediaUrl(path)

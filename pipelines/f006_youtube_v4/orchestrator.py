@@ -320,11 +320,11 @@ class F006Orchestrator(BasePipeline):
         logger.info(f"[job_id={job_id}] {stage_id} RUNNING 전환 완료")
 
         # 스테이지 클래스 인스턴스화
-        # STAGE_04_VIDEO_GEN: render_mode가 video_bg / remotion_native이면 Stage04bVideoJson 선택
-        # STAGE_05_EDIT: render_mode에 따라 Stage05Edit / Stage05rRemotion / Stage05rRemotionB / Stage05rRemotionA 선택
+        # STAGE_04_VIDEO_GEN: render_mode가 video_bg / remotion_native / fluid_bg이면 Stage04bVideoJson 선택
+        # STAGE_05_EDIT: render_mode에 따라 Stage05Edit / Stage05rRemotion / Stage05rRemotionB / Stage05rRemotionA / Stage05rRemotionC 선택
         if stage_id == "STAGE_04_VIDEO_GEN":
             render_mode_04: str = input_data.get("render_mode", "ffmpeg")
-            if render_mode_04 in ("video_bg", "remotion_native"):
+            if render_mode_04 in ("video_bg", "remotion_native", "fluid_bg"):
                 from pipelines.f006_youtube_v4.stages.stage04b_video_json import Stage04bVideoJson
                 stage_class = Stage04bVideoJson
                 logger.info(
@@ -359,6 +359,12 @@ class F006Orchestrator(BasePipeline):
                 stage_class = Stage05rRemotionA
                 logger.info(
                     f"[job_id={job_id}] STAGE_05_EDIT: remotion_native -> Stage05rRemotionA"
+                )
+            elif render_mode_05 == "fluid_bg":
+                from pipelines.f006_youtube_v4.stages.stage05r_remotion_c import Stage05rRemotionC
+                stage_class = Stage05rRemotionC
+                logger.info(
+                    f"[job_id={job_id}] STAGE_05_EDIT: fluid_bg -> Stage05rRemotionC"
                 )
             else:
                 stage_class = Stage05Edit

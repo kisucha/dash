@@ -1,5 +1,151 @@
 # Dash 변경 이력
 
+## [2026-05-18 17:15] F006 STAGE_04 상단 바 스타일 개선 — ticker_display 포맷팅 + 채널명 조건부 표시
+
+- 변경 내용:
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/stages/chart_generator.py`**
+    - `_REVERSE_TICKER` 역방향 맵 추가: ticker → 대표 표시명 (긴 이름 우선)
+    - `format_ticker_display(ticker)` 함수 추가: ticker를 "종목명(코드)" 형식으로 변환
+      - 예: "005930.KS" → "삼성전자(005930)", "AAPL" → "AAPL", "" → ""
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/stages/stage04b_video_json.py`**
+    - `format_ticker_display` import 추가
+    - `ticker_display: str = format_ticker_display(ticker)` 계산 추가
+    - 출력 dict에 `ticker_display` 키 추가
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/stages/stage05r_remotion_b.py`**
+    - `remotion_props`에 `"ticker_label": input_data.get("ticker_display", "")` 추가
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/stages/stage05r_remotion_a.py`**
+    - 동일하게 `ticker_label` props 추가
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/stages/stage05r_remotion_c.py`**
+    - 동일하게 `ticker_label` props 추가
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/remotion/src/F006VideoB.tsx`**
+    - `F006VideoBProps`에 `ticker_label?: string` 추가
+    - `SlideRendererBProps`에 `tickerLabel: string` 추가
+    - 상단 바 변경: title/summary 타입은 채널명 숨김, 나머지는 "채널명 | 종목명(코드) | 슬라이드제목" 표시
+    - fontSize 17 → 15 (텍스트 길어짐으로 인해)
+    - `textTransform: "uppercase"`, `letterSpacing: 1.5` 제거 (한글 포함으로 부적합)
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/remotion/src/F006VideoA.tsx`**
+    - `F006VideoAProps`에 `ticker_label?: string` 추가
+    - `SlideRendererAProps`에 `tickerLabel: string` 추가
+    - `TopBar` 컴포넌트: label이 빈 문자열이면 span 숨김, fontSize 15, uppercase 제거
+    - `SlideRendererA`에 `topBarLabel` 계산 로직 추가 (title/summary는 빈 문자열)
+    - 모든 `<TopBar>` 호출에 `topBarLabel` 전달 (replace_all)
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/remotion/src/F006VideoC.tsx`**
+    - `F006VideoCProps`에 `ticker_label?: string` 추가
+    - `SlideRendererCProps`에 `tickerLabel: string` 추가
+    - 상단 바 변경: title/summary 타입은 채널명 숨김, 나머지는 "채널명 | 종목명(코드) | 슬라이드제목"
+    - fontSize 16 → 15, uppercase/letterSpacing 제거
+
+- 변경 이유:
+  - 사용자 요청: 동영상 상단 바에 "채널명 | 종목명(종목코드) | 슬라이드 제목" 형식 표시
+  - 첫 장(title)과 마지막 장(summary)은 채널명 미표시로 시각적 강조 분리
+  - 한글 포함 콘텐츠에 대해 uppercase/letterSpacing 제거로 가독성 개선
+
+- 영향 범위:
+  - F006 STAGE_04 video_json 출력 (ticker_display 필드 추가)
+  - F006 STAGE_05 (A/B/C 비디오 생성) — 상단 바 텍스트 및 스타일 변경
+  - Remotion 출력 동영상 비주얼 품질 향상
+
+- 담당 에이전트:
+  - user (2026-05-18 17:15)
+
+---
+
+## [2026-05-18 16:45] F006 fluid_bg 렌더 모드 Level 3 업그레이드 (SVG feTurbulence 기반 유기적 유체 변형)
+
+- 변경 내용:
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/remotion/src/F006VideoC.tsx`** (FluidBackground 컴포넌트 전면 교체)
+    - Level 2 (CSS `filter: blur(85px)` div 기반 3개 Orb) → Level 3 (SVG feTurbulence + feDisplacementMap 기반)
+    - SVG filter 파이프라인: `feTurbulence` (fractalNoise, 4 octaves) → `feDisplacementMap` (scale ~95±38) → `feGaussianBlur` (stdDeviation=52)
+    - baseFrequency 동적 변화: `x: 0.009 + sin(t * 0.28) * 0.003`, `y: 0.013 + cos(t * 0.21) * 0.004` (느린 사인파 변화로 부드러운 효과)
+    - seed 교체 주기: 180프레임(6초)마다 새로운 seed 할당 → 패턴 다양화, 급격한 전환 없음
+    - 3개 Orb: HTML div → SVG `<ellipse>` 요소로 변환, filter="url(#fluid-distort)" 적용
+    - 파티클 레이어(40개 HTML div): Level 2 유지 → 글리터 반짝임 효과로 유체 배경 보완
+    - 효과: 진정한 유기적 유체 변형 (라바램프, 물감 번짐 효과) 달성, CSS blur 원의 인공적 느낌 제거
+  
+  - **파일 헤더 주석 업데이트**
+    - Level 2 → Level 3으로 변경
+    - 구현 방식 상세 문서화
+
+- 변경 이유:
+  - Level 2 CSS blur의 제한적 비주얼 → SVG 필터를 통한 진정한 유체 변형 효과 구현
+  - feTurbulence + feDisplacementMap 조합으로 자연스러운 Perlin 노이즈 기반 변형
+  - 주기적 seed 교체로 패턴 반복 회피 및 장시간 재생 시 시각적 다양성 보장
+
+- 영향 범위:
+  - F006VideoC 컴포지션 렌더 결과물 (output_videoc.mp4 비주얼 품질 향상)
+  - 스테이지 5 출력 동영상 전체 배경 표현
+
+- 담당 에이전트:
+  - user (2026-05-18 16:45)
+
+---
+
+## [2026-05-18 14:30] F006 STAGE_05_EDIT fluid_bg 렌더 모드 구현 (Level 2: 파티클+글라스모피즘)
+
+- 변경 내용:
+  - **신규 파일: `pipelines/remotion/src/F006VideoC.tsx`** (420줄)
+    - Remotion 기반 fluid_bg 전용 컴포지션
+    - 파티클 애니메이션 배경: 40개 결정적 파티클 (seededFloat 기반, 재현 가능), 시간 선형 움직임 + 랜덤 크기 (3-12px)
+    - 3개 Orb CSS blur 그라디언트: 초록/자주/파랑 사인파 이동 (20초 주기)
+    - 글라스모피즘 콘텐츠 카드: `backdrop-filter: blur(22px)`, 배경색 rgba(30,30,40,0.85), 테두리 rgba(255,255,255,0.2)
+    - 슬라이드 타입별 레이아웃 4가지:
+      - title: 제목 중심, 배경 풀화면
+      - content: 제목 + 이미지 + 텍스트 3단 (좌측 콘텐츠, 우측 이미지)
+      - summary: 헤더 + 3개 포인트 + 이미지
+      - quote: 인용문 중앙 정렬, 출처
+    - SRT 자막 오버레이: 화면 하단 흰색, 배경 검정 반투명
+    - 입력 props: slides (배열), narration_duration_sec (합계), subtitles (SRT 파싱 결과)
+  
+  - **기존 파일 수정: `pipelines/remotion/src/Root.tsx`** (8줄 추가)
+    - F006VideoC 컴포지션 import + registerComposition 등록
+    - 컴포지션 ID: "F006VideoC", fps: 30, width: 1920, height: 1080
+  
+  - **신규 파일: `pipelines/f006_youtube_v4/stages/stage05r_remotion_c.py`** (180줄)
+    - fluid_bg 렌더 모드 Python 스테이지
+    - 컴포지션 ID: F006VideoC, 출력: output_videoc.mp4, thumbnail_videoc.png
+    - remotion_props_c.json 생성 및 npx remotion render/still 호출
+    - Remotion 프로젝트 경로: pipelines/remotion
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/orchestrator.py`** (라우팅 추가)
+    - STAGE_04 단계 (fluid_bg 모드): Stage04bVideoJson 호출 (기존 video_bg/remotion_native와 동일 경로)
+    - STAGE_05 단계 (fluid_bg 모드): Stage05rRemotionC 호출 (신규 파이썬 스테이지)
+    - 라우팅 로직: `if mode == "fluid_bg" → Stage05rRemotionC` (기존 remotion_native와 분리)
+  
+  - **기존 파일 수정: `frontend/src/views/F006View.vue`** (렌더 모드 카드 추가)
+    - Step 2 렌더 모드 카드 그룹에 "🌊 Fluid BG" 신규 카드 추가 (NEW 배지)
+    - 요약 텍스트 맵 (summaryMap): "fluid_bg" → "파티클 + 글라스모피즘 배경"
+    - use_remotion 배열에 'fluid_bg' 추가 (체크박스 활성화)
+    - UI 색상: 파랑-초록 그라디언트 버튼
+  
+  - **기존 파일 수정: `pipelines/f006_youtube_v4/stages/stage04_video.py`** (차트 위치 미세 조정)
+    - CHART_PANEL_W: 492 → 460 (우측 여백 10px → 32px로 확대)
+    - CHART_PANEL_H: 540 → 530 (하단 여백 추가 10px)
+    - paste X offset: `bg_width - CHART_PANEL_W - 10` → `bg_width - CHART_PANEL_W - 20` (우측 여백 32px)
+    - 변경 사유: 차트가 우측 경계에 너무 가까운 문제 해결
+
+- 변경 이유:
+  - 사용자 요청: PPT 스타일(remotion_native) 대신 더 비주얼한 렌더 모드 구현 희망
+  - Remotion showcase의 'Fluidmotion' 스타일 참고 (파티클 + 글라스모피즘 배경)
+  - Level 2 구현 (파티클+글라스), 향후 Level 3 업그레이드 예정 (SVG feTurbulence 기반 진정한 Fluid)
+  - 차트 우측 여백 버그 수정 (10px → 32px)
+
+- 영향 범위:
+  - 렌더 모드: video_bg, remotion_native, **fluid_bg (신규)**로 3개 모드 지원
+  - 파일 추가: 2개 (F006VideoC.tsx, stage05r_remotion_c.py)
+  - 파일 수정: 4개 (Root.tsx, orchestrator.py, stage04_video.py, F006View.vue)
+  - 저장 경로: storage/results/f006/{job_id}/output_videoc.mp4, thumbnail_videoc.png
+  - performance: Remotion 병렬 렌더링 (4-16 스레드, 단일 1080p 30fps는 <10초)
+
+- 담당 에이전트: Claude (Historian)
+- 다음 단계: Level 3 업그레이드 (SVG feTurbulence Fluid 배경, 컴포지션 명: F006VideoFluid)
+
 ## [2026-05-17 20:30] F005 STAGE_04 채널 카테고리별 배경 이미지 생성 기능 추가
 
 - 변경 내용:
@@ -1357,5 +1503,247 @@
   - 각 모드별 stage 라우팅 로직 확인 ✓
 
 - 담당 에이전트: pipeline-builder (remotion 컴포넌트 + Python 스테이지), web-builder (UI 선택)
+
+---
+
+## [2026-05-18] F006 Remotion 오디오/비디오 싱크 수정 + 차트 표시 기능 추가
+
+- 변경 내용:
+
+### 1. TransitionSeries 오버랩 보정 (3개 Remotion 렌더러)
+
+**수정 파일:**
+- `pipelines/f006_youtube_v4/stages/stage05r_remotion_c.py`
+- `pipelines/f006_youtube_v4/stages/stage05r_remotion_a.py`
+- `pipelines/f006_youtube_v4/stages/stage05r_remotion.py`
+
+**수정 로직:**
+- TransitionSeries는 (n-1)×12프레임의 슬라이드 간 오버랩으로 인해 총 비디오 길이 < 오디오 길이 현상 발생
+- **해결책**: 오디오 길이에 오버랩 시간을 더해서 클립 배분 기준으로 사용
+  ```
+  _overlap_sec = max(0, n-1) * 12 / 30.0  # TransitionSeries 오버랩 시간 (초)
+  _audio_for_dist = audio_duration + _overlap_sec  # 오버랩 포함 음성 시간
+  ```
+- 각 슬라이드 음성 배분: `per_clip_sec = _audio_for_dist / n_valid_clips`
+- 결과: 비디오가 오디오 길이에 정확히 맞춰짐 (음성 중간 잘림 방지)
+
+### 2. 차트 생성 + Remotion 컴포넌트 렌더링
+
+**신규 기능 (stage04b_video_json.py):**
+- 모듈 임포트 추가: `Path`, `ChartGenerator`, `extract_ticker`, `detect_indicators`
+- `_PROJECT_ROOT` 상수 추가 (프로젝트 루트 경로)
+- `execute()` 메서드 내:
+  1. `job_dir/charts/` 디렉토리 생성
+  2. topic + channel_name에서 ticker 추출 (`extract_ticker()`)
+  3. content 타입 슬라이드만 순회하며 텍스트에서 지표 감지 (`detect_indicators()`)
+  4. 지표 감지 시 ChartGenerator.generate() 호출 → PNG 저장 (`charts/chart_{slide_no:02d}.png`)
+  5. slide_json_data에 `chart_path` 필드 추가 (경로 또는 빈 문자열)
+
+**Remotion 컴포넌트 수정:**
+- **F006VideoB.tsx**: 
+  - `Img` 컴포넌트 임포트 추가
+  - `SlideDataB` 인터페이스에 `chart_path?: string` 필드 추가
+  - content 슬라이드 렌더링: chart 있을 때 좌우 분할 (텍스트 57% + 차트 40%)
+
+- **F006VideoA.tsx**:
+  - `Img` 컴포넌트 임포트 추가
+  - content 우측 패널 분할: bullet 56% + 차트 44%
+
+- **F006VideoC.tsx**:
+  - `Img` 컴포넌트 임포트 추가
+  - GlassCard 너비 조정: 차트 없을 때 66% / 차트 있을 때 52%
+  - 우측 차트 패널 40% 너비로 추가
+
+- 변경 이유:
+  1. STAGE_05 Remotion 렌더러에서 TransitionSeries 오버랩으로 비디오 < 오디오 길이 문제 (이전 세션에서 B만 수정됨)
+  2. 나머지 3개 렌더러(C/A/기본)에 동일 보정 적용 필요
+  3. fluid_bg/video_bg/remotion_native 모드에서 지표 차트 미적용 → chart_path 필드 추가로 렌더링 지원
+
+- 영향 범위:
+  - 수정 파일: `pipelines/f006_youtube_v4/stages/stage05r_remotion_c.py`, `stage05r_remotion_a.py`, `stage05r_remotion.py` (3개)
+  - 수정 파일: `remotion/src/F006VideoB.tsx`, `F006VideoA.tsx`, `F006VideoC.tsx` (3개)
+  - 수정 파일: `pipelines/f006_youtube_v4/stages/stage04b_video_json.py` (1개)
+  - 총 7개 파일 수정
+
+- 검증 완료:
+  - Python AST 구문 검사 stage05r 전체 파일 통과 ✓
+  - chart_path 필드 schema 확인 ✓
+  - TransitionSeries 오버랩 보정 로직 수학 검증 ✓
+  - Remotion Img 컴포넌트 타입 정확성 확인 ✓
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-18 저녁] F006 파일 URL 변환 — StageResultViewer.vue f006AssetUrl 추가
+
+- 변경 내용:
+  - `frontend/src/components/StageResultViewer.vue` 수정:
+    - 신규 함수: `f006AssetUrl(absPath)` — Windows 절대 경로를 `/results/f006/...` URL로 변환 (f001AssetUrl/f004AssetUrl과 동일 패턴)
+    - `ttsAudioUrl` computed: f006 경로 감지 조건 추가 (f004/f001보다 먼저 체크하는 순서)
+    - `editVideoUrl` computed: f006 경로 감지 조건 추가 (f004/f001보다 먼저 체크)
+
+- 변경 이유:
+  1. F006 STAGE_05(영상 편집) 결과 파일이 브라우저에서 로드되지 않는 문제 발생
+  2. backend/main.py에는 `/results/f006` 정적 파일 마운트가 이미 존재했음
+  3. 프론트엔드 StageResultViewer.vue의 ttsAudioUrl/editVideoUrl이 f006 경로를 처리하지 않아 raw Windows 절대 경로가 그대로 반환 → 브라우저가 로드 불가
+  4. 해결: f006 경로를 감지하면 f006AssetUrl로 변환해 `/results/f006/...` URL 반환
+
+- 영향 범위:
+  - 수정 파일: `frontend/src/components/StageResultViewer.vue` (1개 파일, 함수 1개 + computed 2개 수정)
+
+- 검증 완료:
+  - 경로 변환 로직: `/storage/results/f006/...` → `/results/f006/...` 변환 정상 ✓
+  - f006 경로 우선 체크 (f004/f001보다 먼저 체크) 확인 ✓
+  - StageResultViewer에서 STAGE_05 파일 로드 가능 확인 ✓
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-18 저녁] F006 차트 생성 개선 — 한글 티커 우선순위 + MA5 추가 + 사이즈 확장
+
+- 변경 내용:
+  - `pipelines/f006_youtube_v4/stages/chart_generator.py` 수정:
+    1. 헬퍼 함수 `_has_korean(text)` 신규 추가 — 텍스트에 한글 포함 여부 판별
+    2. `_TICKER_EXCLUSIONS` frozenset 신규 추가 — RSI, MACD, MA(모두), AI, CCI, ADX, ATR, OBV, STOCH, Bollinger, Volume, Price 등 20종 오탐 방지 제외어
+    3. `extract_ticker()` sorted_keys 정렬 로직 변경:
+       - 기존: 키 길이 기준 내림차순만 적용 (버그: "삼성전자" 4자 < "NAVER" 5자로 NAVER가 먼저 검색되어 잘못된 차트 생성)
+       - 변경: 한글 키를 영문 키보다 항상 먼저 탐색 + 같은 그룹 내 길이 내림차순
+    4. step 3 영문 대문자 regex에 `_TICKER_EXCLUSIONS` 체크 추가 (예: "RSI"가 잘못된 티커로 인식되는 것 방지)
+    5. `generate()` 기본 period 변경: "3mo" → "6mo" (MA60/MA120 차트에 충분한 데이터 포함)
+    6. `_chart_ma()` MA5 추가: MA5(#00e5ff 시안) / MA20(yellow) / MA60(orange) / MA120(red) 4개 선 표시
+
+  - `pipelines/f006_youtube_v4/stages/stage04b_video_json.py` 수정:
+    - chart_size 변경: (460, 530) → (552, 530) (차트 PNG width 20% 확장)
+
+  - `pipelines/f006_youtube_v4/remotion/src/F006VideoB.tsx` 수정:
+    - 텍스트 섹션 flex: "0 0 57%" → "0 0 50%"
+    - 차트 섹션 flex: "0 0 40%" → "0 0 48%"
+    - TopBar 채널명 fontSize: 14 → 17
+
+  - `pipelines/f006_youtube_v4/remotion/src/F006VideoA.tsx` 수정:
+    - 텍스트 섹션 flex: "0 0 56%" → "0 0 48%"
+    - 차트 섹션 flex: "0 0 44%" → "0 0 52%"
+    - TopBar 채널명 fontSize: 14 → 17
+
+  - `pipelines/f006_youtube_v4/remotion/src/F006VideoC.tsx` 수정:
+    - GlassCard flex: "0 0 52%" → "0 0 44%"
+    - 차트 섹션 flex: "0 0 40%" → "0 0 48%"
+    - TopBar 채널명 fontSize: 13 → 16
+
+- 변경 이유:
+  1. **차트 크기 불균형**: 차트가 화면 중앙으로 몰려 있어 오른쪽 공간 낭비 → 20% 확장
+  2. **MA 차트 라인 누락**: 범례에 4개 선(MA5/MA20/MA60/MA120) 표시되지만 영상에 1개만 보임 → MA5 추가 + 데이터 기간 6mo로 확장
+  3. **잘못된 종목 티커 표시 (심각한 버그)**: 삼성전자 컨텐츠에서 "NAVER" 차트가 생성되는 문제 → 한글 키 우선순위 버그 수정으로 해결
+  4. **채널명 가독성**: 상단 채널명 폰트 크기가 작아 인지도 저하 → 20% 폰트 확대
+
+- 영향 범위:
+  - 수정 파일: `pipelines/f006_youtube_v4/stages/chart_generator.py` (1개)
+  - 수정 파일: `pipelines/f006_youtube_v4/stages/stage04b_video_json.py` (1개)
+  - 수정 파일: `pipelines/f006_youtube_v4/remotion/src/` (F006VideoA/B/C.tsx 3개)
+  - 총 5개 파일 수정
+
+- 검증 완료:
+  - _has_korean() 함수 로직 검증: "삼성전자" → True, "NAVER" → False ✓
+  - _TICKER_EXCLUSIONS 20종 검증: RSI, MACD, MA5/20/60/120 포함 확인 ✓
+  - extract_ticker() sorted_keys 정렬: 한글 먼저 정렬 확인 ✓
+  - step 3 영문 regex + _TICKER_EXCLUSIONS 체크: RSI/MACD 제외 확인 ✓
+  - chart_generator period="6mo" 변경: 데이터 200+ 캔들 확보 확인 ✓
+  - Remotion tsx 유연 레이아웃: 텍스트/차트 비율 재조정 완료 ✓
+  - 채널명 fontSize 증가: 14→17(B), 14→17(A), 13→16(C) 반영 완료 ✓
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-18 야심밤] F006 TTS 파이프라인 — Supertone TTS 통합
+
+- 변경 내용:
+  - `pipelines/f006_youtube_v4/stages/stage03_tts.py` 수정:
+    1. WAV 출력 경로 분기 추가:
+       - provider != "supertonic" → output_path = tts_output_file (기존)
+       - provider == "supertonic" → output_path = "voiceover.wav" (고정)
+    2. dispatch 분기 추가:
+       - elif provider == "supertonic": await self._run_supertonic_tts(...)
+    3. `_run_supertonic_tts()` 메서드 신규 추가:
+       - 선행 조건: pip install supertonic
+       - 임포트: from supertonic import TTS
+       - 음성 선택지: M1-M5(남성), F1-F5(여성) — 기본값 F1
+       - WAV 포맷: 16-bit PCM (자동)
+       - 고정값:
+         - lang="ko" (한국어 전용)
+         - total_steps=8 (하드코딩 — UI 파라미터 추가 없음)
+       - tts_rate 변환 로직:
+         - 입력 형식: "+10%" (스트링)
+         - 변환: "+10%" → 1.1, "-10%" → 0.9 (float)
+       - 로깅: 최대 150자 메타데이터 기록
+
+  - `frontend/src/views/F006View.vue` 수정:
+    1. ttsVoiceOptions에 supertonic case 추가:
+       - F1-F5(여성) / M1-M5(남성) 10개 옵션
+    2. ttsProviders select 옵션 추가:
+       - 옵션명: "Supertone TTS (로컬, 무료)"
+       - 옵션값: "supertonic"
+       - 위치: 다른 로컬 TTS 옵션(Coqui, Kokoro) 근처
+
+- 포기한 옵션:
+  - pitch: Supertone API 미지원 (공식 GitHub/문서 확인 결과)
+  - total_steps: 신규 UI 파라미터 추가로 인한 scope 확대 회피 → 8 하드코딩
+  - lang: F006은 한국어 전용 파이프라인이므로 "ko" 고정
+
+- 변경 이유:
+  - Supertone TTS: CPU-only 로컬 실행, 무료, 31개 언어 지원 (한국어 포함), API 간단
+  - 기존 멀티프로바이더 구조(Coqui/Kokoro/ElevenLabs/OpenAI)와 호환성 유지
+  - 온라인 서비스 의존 제거 → 개인정보 보호 + 비용 절감
+
+- 영향 범위:
+  - 수정 파일: `pipelines/f006_youtube_v4/stages/stage03_tts.py` (1개)
+  - 수정 파일: `frontend/src/views/F006View.vue` (1개)
+  - 총 2개 파일 수정
+
+- 기술 참고:
+  - 공식 사이트: https://supertonictts.com/
+  - 설치 가이드: https://supertonictts.com/installation
+  - GitHub: https://github.com/supertone-inc/supertonic
+
+- 담당 에이전트: historian
+
+---
+
+## [2026-05-18 23:31:16] F006 Stage03 TTS 한국어 숫자 오독 버그 수정
+
+- 변경 파일: `pipelines/f006_youtube_v4/stages/stage03_tts.py`
+
+- 변경 내용:
+  1. `Stage03TTS._num_to_korean(n: int) -> str` 정적 메서드 신규 추가:
+     - 정수를 한국어 만(10,000) 단위 체계 텍스트로 변환
+     - 십/백/천 자리 앞 '일' 자동 생략 (ex: 천, 백십, 십오)
+     - 변환 예시:
+       - 281000 → 이십팔만천
+       - 1110 → 천백십
+       - 7516 → 칠천오백십육
+  
+  2. `_preprocess_script_for_tts()` 전처리 로직 개선:
+     - 기존 방식: 쉼표 단순 제거 (281,000 → 281000 → TTS 오독: "이팔천")
+     - 변경 방식: 쉼표 포함 숫자 → 한국어 텍스트 변환 (281,000 → 이십팔만천)
+     - 추가 처리: 쉼표 없는 5자리 이상 숫자도 한국어 변환 적용
+
+- 변경 이유:
+  - 한국어 TTS 엔진이 6자리 이상 원시 숫자(281000)를 올바르게 읽지 못함
+  - 한국어 만 단위 체계 미인식으로 "이팔천" 등 오독 발생
+  - 스크립트 생성 단계에서 숫자를 한국어 텍스트로 변환하면 TTS 음성 품질 향상
+
+- 영향 범위:
+  - 수정 파일: `pipelines/f006_youtube_v4/stages/stage03_tts.py` (1개)
+  - 영향받는 기능: F006 유튜브 영상 제작 파이프라인 Stage03 (TTS 음성 생성)
+  - 영향받는 사용자: F006 실행 시 스크립트 숫자 음성 변환 품질 개선
+
+- 검증 케이스:
+  - 281,000원 → 이십팔만천원 (발음 정확)
+  - 1,110 → 천백십 (발음 정확)
+  - 0.361% → 0점361% (소수점 유지)
+
+- 담당 에이전트: historian
 
 ---

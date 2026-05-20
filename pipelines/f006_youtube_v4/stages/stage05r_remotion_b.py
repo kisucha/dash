@@ -164,28 +164,36 @@ class Stage05rRemotionB(BaseStage, BasePipeline):
                 f"[F006][STAGE_05RB][job_id={job_id}] 오디오 길이: {audio_duration:.1f}초"
             )
 
+        # 트랜지션 오버랩 보정: TransitionSeries는 전환 1회당 12프레임 겹침(Root.tsx 동기화)
+        # 슬라이드 duration 합계 - overlap = 실제 video 길이 → audio보다 짧아져 음성 잘림
+        # audio_duration에 overlap을 더해 배분 → video 길이 = audio 길이 보장
+        _n = len(slide_json_data) if slide_json_data else 0
+        _overlap_sec = max(0, _n - 1) * 12 / 30.0
+        _audio_for_dist = audio_duration + _overlap_sec if audio_duration > 0 else audio_duration
+
         # slide_json_data에 duration_sec 배분
         if slide_json_data:
             if audio_duration > 0:
                 has_narration = any(s.get("narration") for s in slide_json_data)
                 if has_narration:
                     durations = self._distribute_duration_by_narration(
-                        slide_json_data, audio_duration
+                        slide_json_data, _audio_for_dist
                     )
                     logger.info(
                         f"[F006][STAGE_05RB][job_id={job_id}] narration 비례 배분 - "
-                        f"{audio_duration:.1f}초 / {len(slide_json_data)}슬라이드"
+                        f"오디오 {audio_duration:.1f}초 + 오버랩 보정 {_overlap_sec:.1f}초 "
+                        f"/ {_n}슬라이드"
                     )
                 else:
-                    per_slide = audio_duration / len(slide_json_data)
-                    durations = {i: per_slide for i in range(len(slide_json_data))}
+                    per_slide = _audio_for_dist / _n
+                    durations = {i: per_slide for i in range(_n)}
                     logger.info(
                         f"[F006][STAGE_05RB][job_id={job_id}] 균등 배분 - "
-                        f"{per_slide:.1f}초/슬라이드"
+                        f"{per_slide:.1f}초/슬라이드 (오버랩 보정 포함)"
                     )
             else:
                 # 오디오 없을 때 슬라이드당 5.0초 기본값
-                durations = {i: 5.0 for i in range(len(slide_json_data))}
+                durations = {i: 5.0 for i in range(_n)}
                 logger.info(
                     f"[F006][STAGE_05RB][job_id={job_id}] 오디오 없음 - 슬라이드당 5.0초 기본값"
                 )
@@ -234,6 +242,7 @@ class Stage05rRemotionB(BaseStage, BasePipeline):
             "audio_path": audio_path_normalized,
             "srt_entries": srt_entries,
             "channel_name": channel_name,
+            "ticker_label": input_data.get("ticker_display", ""),
             "theme": theme,
             "transition_mode": transition_mode,
         }
@@ -404,7 +413,7 @@ class Stage05rRemotionB(BaseStage, BasePipeline):
             "video_file_path": output_video_path,
             "subtitle_file_path": subtitle_file_path,
             "duration_sec": total_duration,
-            "resolution": "1280x720",
+            "resolution": "1920x1080",
             "file_size_mb": file_size_mb,
             "has_subtitles": has_subtitles,
             "generated_at": datetime.now(timezone.utc).isoformat(),

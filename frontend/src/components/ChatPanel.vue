@@ -19,6 +19,11 @@ const props = defineProps({
   },
 })
 
+// ── 상수 ──
+const STORAGE_KEY = 'dash_chat_history'
+const CONTEXT_WARN_CHARS = 50000   // 총 문자수 초과 시 경고
+const CONTEXT_WARN_TURNS = 30      // 메시지 수 초과 시 경고
+
 // ── 상태 ──
 
 // 입력창 텍스트
@@ -42,6 +47,30 @@ const inputRef = ref(null)
 // 고유 ID 카운터
 let msgId = 0
 
+// ── 컨텍스트 크기 모니터링 ──
+const totalContextChars = computed(() =>
+  messages.value.reduce((sum, m) => sum + (m.content?.length || 0), 0)
+)
+
+const contextTooLarge = computed(() =>
+  totalContextChars.value > CONTEXT_WARN_CHARS ||
+  messages.value.filter(m => m.role !== 'system').length > CONTEXT_WARN_TURNS
+)
+
+// ── localStorage 연속성 ──
+
+// 완료된 메시지만 localStorage에 저장 (loading 중인 것 제외)
+function persistMessages() {
+  const toSave = messages.value
+    .filter(m => !m.loading)
+    .map(m => ({ role: m.role, content: m.content, suggestions: m.suggestions || [] }))
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
+  } catch {
+    // localStorage 용량 초과 시 무시
+  }
+}
+
 // 브라우저 창/탭이 다시 포커스를 받으면 입력창 포커스 복원 (ERR-004 방지)
 function restoreFocus() {
   // 스트리밍 중이 아닐 때만 복원 (타이핑 방해 방지)
@@ -55,8 +84,24 @@ const onVisibilityChange = () => {
   if (document.visibilityState === 'visible') restoreFocus()
 }
 
-// 마운트 직후 포커스 + 창 복귀 시 포커스 이벤트 등록
+// 마운트 직후 포커스 + 창 복귀 시 포커스 이벤트 등록 + 이전 대화 복원
 onMounted(() => {
+  // localStorage에서 이전 대화 복원
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      messages.value = parsed.map(m => ({
+        id: ++msgId,
+        role: m.role,
+        content: m.content,
+        suggestions: m.suggestions || [],
+        loading: false,
+      }))
+    }
+  } catch {
+    // 손상된 데이터 무시
+  }
   inputRef.value?.focus()
   window.addEventListener('focus', restoreFocus)
   document.addEventListener('visibilitychange', onVisibilityChange)
@@ -97,8 +142,9 @@ async function sendMessage() {
   // 사용자 메시지 추가 전에 이력 캡처 — 쿼리 정제 시 현재 질문 이전 이력을 참조
   const historyForRefine = buildHistory()
 
-  // 사용자 메시지 추가
+  // 사용자 메시지 추가 후 즉시 저장
   messages.value.push({ id: ++msgId, role: 'user', content: text })
+  persistMessages()
   await scrollToBottom()
 
   let searchContext = null
@@ -228,6 +274,8 @@ async function sendMessage() {
   } finally {
     assistantMsg.loading = false
     streaming.value = false
+    // 스트리밍 완료 후 전체 대화 저장
+    persistMessages()
     await scrollToBottom()
     // 전송 완료 후 입력창 포커스 복귀
     await nextTick()
@@ -244,6 +292,7 @@ function sendSuggestion(text) {
 // 대화 초기화
 function clearChat() {
   messages.value = []
+  localStorage.removeItem(STORAGE_KEY)
   nextTick(() => inputRef.value?.focus())
 }
 
@@ -369,6 +418,13 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- 컨텍스트 크기 경고 배너 -->
+    <div v-if="contextTooLarge" class="context-warning-banner">
+      <span class="warning-icon">⚠</span>
+      <span class="warning-text">대화가 길어져 응답 품질이 저하될 수 있습니다.</span>
+      <button class="warning-clear-btn" @click="clearChat">초기화</button>
     </div>
 
     <!-- 입력 영역 -->
@@ -568,6 +624,54 @@ defineExpose({ focusInput: () => inputRef.value?.focus() })
 }
 @keyframes blink {
   50% { opacity: 0; }
+}
+
+/* 컨텍스트 경고 배너 */
+.context-warning-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: #fffbeb;
+  border-top: 1px solid #fcd34d;
+  border-bottom: 1px solid #fcd34d;
+  flex-shrink: 0;
+  animation: warning-pulse 2.5s ease-in-out infinite;
+}
+
+@keyframes warning-pulse {
+  0%, 100% { background: #fffbeb; }
+  50% { background: #fef3c7; }
+}
+
+.warning-icon {
+  font-size: 14px;
+  color: #d97706;
+  flex-shrink: 0;
+}
+
+.warning-text {
+  flex: 1;
+  font-size: 12px;
+  color: #92400e;
+  line-height: 1.4;
+}
+
+.warning-clear-btn {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 10px;
+  background: #d97706;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.warning-clear-btn:hover {
+  background: #b45309;
 }
 
 /* 입력 영역 */

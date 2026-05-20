@@ -1,10 +1,11 @@
-// 목적: Remotion Composition 등록 - F006Video / F006VideoB / F006VideoA 컴포지션을 등록하고 메타데이터를 동적 계산한다.
+// 목적: Remotion Composition 등록 - F006Video / F006VideoB / F006VideoA / F006VideoC 컴포지션을 등록하고 메타데이터를 동적 계산한다.
 import React from "react";
 import type { ComponentType } from "react";
 import { Composition, registerRoot } from "remotion";
 import { F006Video, F006VideoProps } from "./F006Video";
 import { F006VideoB, F006VideoBProps } from "./F006VideoB";
 import { F006VideoA, F006VideoAProps } from "./F006VideoA";
+import { F006VideoC, F006VideoCProps } from "./F006VideoC";
 
 // Remotion Composition의 component prop은 ComponentType<Record<string, unknown>> 타입을 요구.
 // 각 컴포넌트의 Props 인터페이스는 구체적으로 정의되어 있어 직접 할당이 불가능하므로
@@ -58,6 +59,15 @@ const defaultPropsA: F006VideoAProps = {
   transition_mode: "auto",
 };
 
+const defaultPropsC: F006VideoCProps = {
+  slides: [],
+  audio_path: "",
+  srt_entries: [],
+  channel_name: "채널명",
+  theme: "dark_blue",
+  transition_mode: "auto",
+};
+
 // ── Remotion Root ─────────────────────────────────────────────────
 
 export const RemotionRoot: React.FC = () => {
@@ -68,8 +78,8 @@ export const RemotionRoot: React.FC = () => {
         id="F006Video"
         component={F006Video as unknown as AnyComponentType}
         fps={30}
-        width={1280}
-        height={720}
+        width={1920}
+        height={1080}
         defaultProps={defaultProps as unknown as Record<string, unknown>}
         calculateMetadata={({ props }) => {
           const slides = (props as unknown as F006VideoProps).slides;
@@ -82,8 +92,8 @@ export const RemotionRoot: React.FC = () => {
         id="F006VideoB"
         component={F006VideoB as unknown as AnyComponentType}
         fps={30}
-        width={1280}
-        height={720}
+        width={1920}
+        height={1080}
         defaultProps={defaultPropsB as unknown as Record<string, unknown>}
         calculateMetadata={({ props }) => {
           const slides = (props as unknown as F006VideoBProps).slides;
@@ -96,11 +106,25 @@ export const RemotionRoot: React.FC = () => {
         id="F006VideoA"
         component={F006VideoA as unknown as AnyComponentType}
         fps={30}
-        width={1280}
-        height={720}
+        width={1920}
+        height={1080}
         defaultProps={defaultPropsA as unknown as Record<string, unknown>}
         calculateMetadata={({ props }) => {
           const slides = (props as unknown as F006VideoAProps).slides;
+          return { durationInFrames: calcDurationInFrames(slides, 30) };
+        }}
+      />
+
+      {/* F006VideoC — fluid_bg 모드 (파티클 애니메이션 배경 + 글라스모피즘 카드) */}
+      <Composition
+        id="F006VideoC"
+        component={F006VideoC as unknown as AnyComponentType}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={defaultPropsC as unknown as Record<string, unknown>}
+        calculateMetadata={({ props }) => {
+          const slides = (props as unknown as F006VideoCProps).slides;
           return { durationInFrames: calcDurationInFrames(slides, 30) };
         }}
       />

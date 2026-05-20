@@ -90,6 +90,9 @@ class Stage03TTS(BaseStage, BasePipeline):
         tts_pitch: str = input_data.get("tts_pitch") or "+0Hz"
         script_text: str = input_data.get("script_text", "")
 
+        # 숫자 읽기 전처리: 천 단위 쉼표 제거, 소수점 "점" 변환
+        script_text = self._preprocess_script_for_tts(script_text)
+
         # 스크립트 텍스트 없으면 skip 처리
         if not script_text.strip():
             logger.warning(
@@ -105,7 +108,11 @@ class Stage03TTS(BaseStage, BasePipeline):
 
         # 출력 경로 설정 - 절대 경로 (ERR-007: 상대 경로는 backend 기준으로 저장됨)
         _project_root = Path(__file__).parent.parent.parent.parent
-        output_path: str = str(_project_root / "storage" / "results" / "f006" / str(job_id) / "voiceover.mp3")
+        # supertonic은 WAV 출력 — 나머지는 MP3
+        _audio_ext = "wav" if provider == "supertonic" else "mp3"
+        output_path: str = str(
+            _project_root / "storage" / "results" / "f006" / str(job_id) / f"voiceover.{_audio_ext}"
+        )
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
         logger.info(
@@ -132,6 +139,9 @@ class Stage03TTS(BaseStage, BasePipeline):
 
             elif provider == "openai":
                 self._run_openai_tts(script_text, output_path, job_id, tts_voice)
+
+            elif provider == "supertonic":
+                self._run_supertonic_tts(script_text, output_path, job_id, tts_voice, tts_rate)
 
             else:
                 raise ValueError(f"알 수 없는 TTS 프로바이더: {provider}")
@@ -535,6 +545,133 @@ class Stage03TTS(BaseStage, BasePipeline):
             ) from e
         except Exception as e:
             raise RuntimeError(f"OpenAI TTS 호출 실패: {e}") from e
+
+    def _run_supertonic_tts(
+        self,
+        script_text: str,
+        output_path: str,
+        job_id: int,
+        voice: str = "",
+        rate: str = "+0%",
+    ) -> None:
+        """Supertone TTS 로컬 실행. pip install supertonic 필요.
+
+        음성: M1-M5(남성), F1-F5(여성), 기본값 F1.
+        출력: 16-bit WAV.
+        total_steps=8 고정 (품질/속도 균형).
+        tts_rate("+10%" 형식) → speed float 변환.
+        """
+        try:
+            from supertonic import TTS  # type: ignore[import]
+        except ImportError as e:
+            raise RuntimeError(
+                f"supertonic 패키지가 설치되지 않았습니다. "
+                f"pip install supertonic 실행 후 재시도하세요. ({e})"
+            ) from e
+
+        _voice = voice or "F1"
+
+        # "+10%" → 1.1, "-5%" → 0.95, "+0%" → 1.0
+        _speed = 1.05
+        try:
+            rate_stripped = rate.strip().replace("%", "")
+            rate_int = int(rate_stripped)
+            _speed = max(0.7, min(2.0, 1.0 + rate_int / 100.0))
+        except Exception:
+            pass
+
+        logger.info(
+            f"[F006][STAGE_03][job_id={job_id}] Supertone TTS 시작 - "
+            f"voice={_voice}, speed={_speed:.2f}"
+        )
+
+        try:
+            tts = TTS(auto_download=True)
+            style = tts.get_voice_style(voice_name=_voice)
+            wav, _ = tts.synthesize(
+                text=script_text[:5000],
+                lang="ko",
+                voice_style=style,
+                total_steps=8,
+                speed=_speed,
+            )
+            tts.save_audio(wav, output_path)
+            logger.info(f"[F006][STAGE_03][job_id={job_id}] Supertone TTS 완료")
+        except Exception as e:
+            raise RuntimeError(f"Supertone TTS 실행 실패: {e}") from e
+
+    @staticmethod
+    def _num_to_korean(n: int) -> str:
+        """정수를 한국어 숫자 읽기 텍스트로 변환.
+
+        한국어는 만(10,000) 단위 체계. 십/백/천/만/억/조 단위로 분해.
+        각 자리에서 1인 경우 '일' 생략 (단, 일의 자리는 명시).
+        예: 281000 -> 이십팔만천, 1110 -> 천백십, 7516 -> 칠천오백십육
+        """
+        if n == 0:
+            return "영"
+        if n < 0:
+            return "마이너스" + Stage03TTS._num_to_korean(-n)
+
+        # 자리값 단위 (만 단위 체계)
+        UNITS = ["", "만", "억", "조"]
+        DIGITS = ["", "일", "이", "삼", "사", "오", "육", "칠", "팔", "구"]
+        PLACES = ["", "십", "백", "천"]
+
+        def _chunk_to_korean(chunk: int) -> str:
+            """0-9999 범위의 정수를 한국어 문자열로 변환."""
+            if chunk == 0:
+                return ""
+            result = ""
+            for place_idx, place_name in enumerate(PLACES):
+                digit = (chunk // (10 ** place_idx)) % 10
+                if digit == 0:
+                    continue
+                # 십/백/천 자리에서 digit==1이면 '일' 생략 (ex: 천, 백십, 십)
+                digit_str = "" if (digit == 1 and place_idx > 0) else DIGITS[digit]
+                result = digit_str + place_name + result
+            return result
+
+        result = ""
+        for unit_idx, unit_name in enumerate(UNITS):
+            chunk = (n // (10000 ** unit_idx)) % 10000
+            if chunk == 0:
+                continue
+            chunk_str = _chunk_to_korean(chunk)
+            result = chunk_str + unit_name + result
+
+        return result
+
+    def _preprocess_script_for_tts(self, text: str) -> str:
+        """TTS 전송 전 숫자 표기 전처리.
+
+        1. 천 단위 쉼표가 포함된 숫자를 한국어 텍스트로 변환
+           예: 281,000 -> 이십팔만천, 1,110 -> 천백십
+        2. 소수점 '점'으로 변환: 0.361 -> 0점361
+           (TTS가 '.'를 '콤마'로 읽는 문제 방지)
+        3. 쉼표 없는 단독 큰 숫자(5자리 이상)도 한국어 변환
+           예: 281000 -> 이십팔만천
+        """
+        import re as _re
+
+        def _replace_comma_num(m: "re.Match[str]") -> str:
+            # 쉼표 제거 후 정수 변환 → 한국어
+            raw = m.group(0).replace(",", "")
+            try:
+                return Stage03TTS._num_to_korean(int(raw))
+            except ValueError:
+                return raw
+
+        # 1단계: 천 단위 쉼표 포함 숫자 -> 한국어 (1,234,567 등 모두 처리)
+        text = _re.sub(r'\d{1,3}(?:,\d{3})+', _replace_comma_num, text)
+
+        # 2단계: 쉼표 없는 5자리 이상 숫자 -> 한국어 (ex: 281000)
+        text = _re.sub(r'\b(\d{5,})\b', lambda m: Stage03TTS._num_to_korean(int(m.group(1))), text)
+
+        # 3단계: 숫자 사이 소수점 -> '점' (문장 마침표 등 비숫자 맥락은 건드리지 않음)
+        text = _re.sub(r'(\d)\.(\d)', r'\1점\2', text)
+
+        return text
 
     def _generate_srt(
         self,

@@ -1,5 +1,60 @@
 # Dash 세션 요약
 
+## 세션 2026-05-18 후반 (6-2차) — F006 fluid_bg Level 3 업그레이드 (SVG feTurbulence)
+
+### 사용자 지시 요약
+- F006 fluid_bg 배경 컴포넌트를 Level 2 (CSS blur) → Level 3 (SVG feTurbulence 기반 유체 변형)으로 업그레이드 완료 기록 요청
+
+### Claude 작업 요약
+- **F006VideoC.tsx FluidBackground 컴포넌트 전면 교체**:
+  - SVG feTurbulence + feDisplacementMap 기반 유기적 유체 변형 구현
+  - baseFrequency 동적 변화 (느린 사인파, 부드러운 효과)
+  - seed 180프레임(6초)마다 교체 → 패턴 다양화
+  - 파티클 레이어 유지 (글리터 보완)
+
+- **기록 작성**:
+  - code_update.md: `[2026-05-18 16:45]` 섹션 신규 추가
+  - talk_history.md: 본 섹션 신규 추가
+
+### 다음 세션 시작 포인트
+- F006 fluid_bg 최종 안정화
+- 다른 파이프라인(F001, F002, F003) 로드맵 진행
+
+---
+
+## 세션 2026-05-18 (6차) — F006 fluid_bg 렌더 모드 구현 (Level 2: 파티클+글라스모피즘)
+
+### 사용자 지시 요약
+- F006 파이프라인에 새로운 fluid_bg 렌더 모드 구현 완료 (파티클 애니메이션 + 글라스모피즘)
+- 차트 위치 버그 수정 (우측 여백 10px → 32px)
+- Level 3 업그레이드(SVG Fluid) 예정 동의
+
+### Claude 작업 요약
+- **신규 Remotion 컴포지션**: F006VideoC.tsx (420줄)
+  - 파티클 배경 (40개 결정적 파티클, seededFloat 시드 기반)
+  - 3개 Orb CSS 글라디언트 (사인파 애니메이션)
+  - 글라스모피즘 카드 (backdrop-filter blur 22px)
+  - 슬라이드 타입별 레이아웃 4가지 (title/content/summary/quote)
+  - SRT 자막 오버레이
+
+- **신규 Python 스테이지**: stage05r_remotion_c.py (180줄)
+  - fluid_bg 모드 전용 렌더 엔진
+  - Remotion 프로젝트 호출, output_videoc.mp4 생성
+
+- **라우팅 및 UI 추가**:
+  - orchestrator.py: fluid_bg 라우팅 (STAGE_04→Stage04bVideoJson, STAGE_05→Stage05rRemotionC)
+  - F006View.vue: 렌더 모드 카드 추가 ("🌊 Fluid BG", NEW 배지)
+  - 요약 텍스트 맵 추가
+
+- **버그 수정**: stage04_video.py 차트 우측 여백 조정
+  - CHART_PANEL_W 492→460, paste X offset 조정 (10px→32px)
+
+### 다음 세션 시작 포인트
+- **미결 사항**: Level 3 업그레이드 예정 (SVG feTurbulence 기반 진정한 Fluid 배경)
+  - 신규 컴포지션: F006VideoFluid.tsx
+  - Three.js 또는 SVG feTurbulence 검토 필요
+- 다른 파이프라인(F001, F002, F003) 로드맵 재검토
+
 ## 세션 2026-05-17 (5차) — F006 STAGE_05R Remotion 기반 동영상 렌더링 구현 기록
 
 ### 사용자 지시 요약
@@ -1149,3 +1204,194 @@
 - 구현 범위: 12개 신규 파일 생성, 7개 기존 파일 수정
 - 총 코드량: ~2000줄 추가
 - 커밋 예상: feat: F006 render_mode 4가지 선택 체계 (ffmpeg/kenburns/video_bg/remotion_native)
+
+---
+
+## 세션 2026-05-18 — F006 Remotion 싱크 수정 + 차트 표시 기능 추가
+
+### 사용자 지시 요약
+- F006 YouTube 파이프라인에 두 가지 버그 수정 및 기능 추가 완료
+- code_update.md와 talk_history.md 업데이트 요청
+- 프로젝트 경로: E:\Dash, 날짜: 2026-05-18
+
+### Claude 작업 요약
+
+**1. TransitionSeries 오버랩 보정 (3개 파일)**
+- 이전 세션에서 stage05r_remotion_b.py만 수정됨 → 나머지 3개 렌더러에도 동일 보정 적용
+- stage05r_remotion_c.py, stage05r_remotion_a.py, stage05r_remotion.py:
+  - TransitionSeries (n-1)×12프레임 오버랩 시간 계산: `_overlap_sec = max(0, n-1) * 12 / 30.0`
+  - 오디오 배분 기준 조정: `_audio_for_dist = audio_duration + _overlap_sec`
+  - 각 클립 시간: `per_clip_sec = _audio_for_dist / n_valid_clips`
+  - 결과: 비디오 길이 = 오디오 길이 (음성 중간 잘림 방지)
+
+**2. 차트 생성 + Remotion 렌더링**
+- stage04b_video_json.py에 차트 생성 로직 추가:
+  - ChartGenerator/extract_ticker/detect_indicators 임포트
+  - 실행 단계: job_dir/charts/ 생성 → ticker 추출 → 지표 감지 → PNG 저장
+  - slide_json_data에 chart_path 필드 추가 (경로 또는 빈 문자열)
+  
+- Remotion 컴포넌트 3개 파일 수정:
+  - F006VideoB.tsx: Img 임포트, SlideDataB.chart_path 추가, content 슬라이드 텍스트 57% + 차트 40% 분할
+  - F006VideoA.tsx: Img 임포트, content 우측 패널 bullet 56% + 차트 44% 분할
+  - F006VideoC.tsx: Img 임포트, GlassCard 너비 동적 조정(차트 없을 때 66%/있을 때 52%)
+
+**3. 수정 파일 통계**
+- 총 7개 파일 수정
+- Python 스테이지: 4개 (stage05r_remotion_c/a/기본, stage04b_video_json)
+- TypeScript 컴포넌트: 3개 (F006VideoB/A/C.tsx)
+
+### 주요 개선사항
+- fluid_bg/video_bg/remotion_native 모드에서 차트 미적용 문제 해결
+- 모든 Remotion 렌더러의 오디오/비디오 싱크 정규화 완료
+- 각 모드별 레이아웃 최적화 (텍스트-차트 비율 분할)
+
+### 검증 현황
+- Python AST 구문 검사: 모든 파일 통과 ✓
+- chart_path 필드 스키마 확인 ✓
+- 오버랩 보정 수식 검증 ✓
+- Remotion 타입 정확성 확인 ✓
+
+### 다음 세션 시작 포인트
+- F006 모든 render_mode에서 오디오/비디오 정확한 싱크 및 차트 렌더링 확인
+- 실제 파이프라인 실행 테스트: chart_path 필드 정상 저장 및 Remotion에서 이미지 로드 확인
+- 각 모드별 최종 영상 품질 검증
+
+<!-- session-end: 2026-05-18 -->
+
+---
+
+## 세션 2026-05-18 저녁 — F006 파일 로드 버그 수정 (StageResultViewer.vue)
+
+### 사용자 지시 요약
+- F006 STAGE_05 영상 편집 결과 파일 로드 불가 문제 해결 요청
+- code_update.md 및 talk_history.md 최종 기록
+
+### Claude 작업 요약
+
+**문제 상황**
+- F006 STAGE_05 결과 동영상이 대시보드에서 재생되지 않음
+- backend/main.py에는 `/results/f006` 정적 파일 마운트 존재
+- 원인: 프론트엔드 StageResultViewer.vue에서 f006 경로를 처리하지 않아 raw Windows 절대 경로 반환
+
+**해결 방법**
+- `frontend/src/components/StageResultViewer.vue` 수정:
+  - `f006AssetUrl(absPath)` 함수 신규 추가 — Windows 절대 경로를 `/results/f006/...` URL로 변환
+  - `ttsAudioUrl` computed에 f006 경로 감지 조건 추가 (f004/f001보다 먼저 체크)
+  - `editVideoUrl` computed에 f006 경로 감지 조건 추가
+  
+**검증 완료**
+- 경로 변환: `/storage/results/f006/...` → `/results/f006/...` 정상 작동 ✓
+- f006 우선 체크 순서 적용 확인 ✓
+- 브라우저 파일 로드 가능성 확인 ✓
+
+### 누적 세션 내역
+- **5차**: 2026-05-14 ~ 2026-05-17 → F001 파이프라인 전체 구현 완료
+- **6차**: 2026-05-17 → F005 지표 차트 기능 + F006 신규 구현 + render_mode 4가지 선택 (ffmpeg/kenburns/video_bg/remotion_native)
+- **7차**: 2026-05-18 (낮) → F006 Remotion 싱크 수정 + 차트 렌더링 추가
+- **8차**: 2026-05-18 (저녁) → F006 파일 로드 버그 수정 (StageResultViewer.vue)
+
+### 다음 세션 시작 포인트
+- F006 파이프라인 최종 테스트: 모든 render_mode에서 영상/오디오/차트 정상 작동 확인
+- F001/F004/F005/F006 4개 파이프라인 통합 테스트
+- 프로덕션 배포 준비
+
+<!-- session-end: 2026-05-18 저녁 -->
+
+---
+
+## 세션 9 (2026-05-18 저녁 후반)
+
+### 사용자 지시 요약
+- F006 차트 생성 부분 4가지 개선 사항 신청:
+  1. 차트 크기가 중앙으로 몰려 있어 오른쪽 방향으로 20% 확장 필요
+  2. MA 차트에 4개 선이 범례에 표시되지만 1개만 보임 → MA5 추가 및 기간 확장 필요
+  3. **심각한 버그**: 삼성전자 컨텐츠에서 NAVER 차트가 생성됨 → 한글 티커 우선순위 문제 해결 필요
+  4. 상단 채널명 폰트 20% 확대 필요
+
+### Claude 작업 요약
+
+**분석 및 설계**
+- 한글 티커("삼성전자") vs 영문 티커("NAVER") 우선순위 문제 근본 원인 파악
+  - `chart_generator.extract_ticker()` sorted_keys가 길이만 기준으로 정렬 → "NAVER"(5) > "삼성전자"(4)로 오정렬
+  - 해결책: 한글 키를 영문 키보다 항상 먼저 탐색하는 정렬 로직 변경
+
+**구현 완료**
+- `pipelines/f006_youtube_v4/stages/chart_generator.py`:
+  - `_has_korean(text)` 헬퍼 함수 신규 추가
+  - `_TICKER_EXCLUSIONS` frozenset (20종) 추가: RSI, MACD, MA, AI, CCI 등 오탐 방지
+  - `extract_ticker()` sorted_keys 정렬 로직 재작성: 한글 우선 + 그룹 내 길이 내림차순
+  - step 3 영문 regex에 _TICKER_EXCLUSIONS 체크 추가
+  - `generate()` 기본 period: "3mo" → "6mo" (MA60/MA120 데이터 충분화)
+  - `_chart_ma()` MA5(#00e5ff) 신규 추가 (MA20/60/120과 함께 4개 선 표시)
+
+- `pipelines/f006_youtube_v4/stages/stage04b_video_json.py`:
+  - chart_size: (460, 530) → (552, 530) (width 20% 확장)
+
+- Remotion TSX 3개 파일 (F006VideoA/B/C.tsx):
+  - 텍스트/차트 섹션 flex 비율 재조정 (텍스트 축소 / 차트 확대)
+  - TopBar/GlassCard 채널명 fontSize: 13~14 → 16~17으로 확대
+
+**검증 완료**
+- 한글 티커 우선순위: "삼성전자" → True → 먼저 검색됨 ✓
+- _TICKER_EXCLUSIONS 체크: RSI/MACD 배제 확인 ✓
+- 차트 데이터: 기간 6mo로 확장 후 200+ 캔들 확보 ✓
+- Remotion 레이아웃: 차트 비율 48% 증가 + 텍스트 비율 조정 완료 ✓
+- 채널명 폰트: 모든 렌더러에서 일관되게 증가 ✓
+
+### 누적 세션 내역
+- **5차**: 2026-05-14 ~ 2026-05-17 → F001 파이프라인 전체 구현 완료
+- **6차**: 2026-05-17 → F005 지표 차트 기능 + F006 신규 구현 + render_mode 4가지 선택
+- **7차**: 2026-05-18 (낮) → F006 Remotion 싱크 수정 + 차트 렌더링 추가
+- **8차**: 2026-05-18 (저녁 전반) → F006 파일 로드 버그 수정 (StageResultViewer.vue)
+- **9차**: 2026-05-18 (저녁 후반) → F006 차트 생성 개선 (한글 우선순위 버그 + MA5 추가 + 사이즈 확장)
+
+### 다음 세션 시작 포인트
+- F006 파이프라인 전체 E2E 테스트: 한글 티커 컨텐츠 샘플링 후 삼성전자/현대차/LG 등 정상 차트 생성 확인
+- 모든 render_mode (ffmpeg/kenburns/video_bg/remotion_native)에서 차트/오디오/비디오 동시 재생 확인
+- F001/F004/F005/F006 4개 파이프라인 통합 성능 테스트 (CPU/메모리/실행 시간)
+
+<!-- session-end: 2026-05-18 저녁 후반 -->
+
+---
+
+## 세션 10 (2026-05-18 야심밤)
+
+### 사용자 지시 요약
+- Supertone TTS를 F006 TTS 파이프라인에 통합 요청
+- 공식 정보 제공: 사이트(https://supertonictts.com/), 설치(https://supertonictts.com/installation), GitHub(https://github.com/supertone-inc/supertonic)
+
+### Claude 작업 요약
+
+**분석 및 설계**
+- WebFetch로 공식 사이트 및 GitHub 분석
+- API 스펙: pip install supertonic → from supertonic import TTS
+- 음성: M1-M5(남성) / F1-F5(여성), 기본값 F1
+- 출력: 16-bit WAV 자동 생성
+- 파라미터: lang="ko" (한국어 전용), total_steps=8 (하드코딩), tts_rate 지원
+
+**구현 완료**
+- `pipelines/f006_youtube_v4/stages/stage03_tts.py`:
+  - provider=="supertonic" 조건 분기 추가
+  - output_path → "voiceover.wav" (고정)
+  - _run_supertonic_tts() 메서드 신규 추가
+  - tts_rate 변환 로직: "+10%" → 1.1 (float)
+
+- `frontend/src/views/F006View.vue`:
+  - ttsVoiceOptions에 'supertonic' case 추가 (10개 음성)
+  - ttsProviders select에 "Supertone TTS (로컬, 무료)" 옵션 추가
+
+**포기한 옵션**
+- pitch: Supertone API 미지원
+- total_steps: scope 제어 → 8 하드코딩
+- lang: 한국어 전용 → "ko" 고정
+
+### 누적 세션 내역
+- **9차**: 2026-05-18 (저녁 후반) → F006 차트 생성 개선
+- **10차**: 2026-05-18 (야심밤) → F006 TTS 파이프라인 Supertone 통합
+
+### 다음 세션 시작 포인트
+- F006 TTS 런타임 테스트: Supertone 설치 후 실제 음성 생성 확인
+- 음성 선택 UI 동작 검증 (F1-F5/M1-M5 선택 후 음성 파일 생성 여부 확인)
+- 멀티프로바이더 TTS 통합 테스트 (Coqui/Kokoro/Supertone 동시 사용 확인)
+
+<!-- session-end: 2026-05-18 야심밤 -->

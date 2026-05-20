@@ -30,9 +30,9 @@ FOOTER_H = 60
 
 # -- 차트 패널 레이아웃 상수 --
 CHART_PANEL_X = 768          # 텍스트 영역 끝 (W * 0.6)
-CHART_PANEL_W = 492          # 차트 패널 너비 (W - CHART_PANEL_X - 20)
+CHART_PANEL_W = 460          # 차트 너비 (우측 여백 32px 확보: 768+20+460+32=1280)
 CHART_PANEL_Y = HEADER_H + 10
-CHART_PANEL_H = 540          # H - HEADER_H - FOOTER_H - 10
+CHART_PANEL_H = 530          # 높이 (푸터 20px 여백 포함: 100+530+10=640 < 660)
 TEXT_AREA_W = CHART_PANEL_X - MARGIN_X - 20  # 차트 있을 때 텍스트 영역 너비
 
 # -- 색상 테마 --
@@ -645,7 +645,7 @@ class SlideRenderer:
             chart_img = chart_img.resize(
                 (CHART_PANEL_W, CHART_PANEL_H), Image.LANCZOS
             )
-            img.paste(chart_img, (CHART_PANEL_X + 10, CHART_PANEL_Y))
+            img.paste(chart_img, (CHART_PANEL_X + 20, CHART_PANEL_Y))
         except Exception as e:
             logger.warning(f"[SlideRenderer] 차트 이미지 로드 실패 - 폴백: {e}")
             return self.render_content(slide, page, total)

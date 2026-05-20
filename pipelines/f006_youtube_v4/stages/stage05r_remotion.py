@@ -168,25 +168,30 @@ class Stage05rRemotion(BaseStage, BasePipeline):
                 "generated_at": datetime.now(timezone.utc).isoformat(),
             }
 
+        # 트랜지션 오버랩 보정: TransitionSeries는 전환 1회당 12프레임 겹침(Root.tsx 동기화)
+        _n_clips = len(valid_clips)
+        _overlap_sec = max(0, _n_clips - 1) * 12 / 30.0
+        _audio_for_dist = audio_duration + _overlap_sec if audio_duration > 0 else audio_duration
+
         # narration 비례 배분으로 슬라이드별 duration_sec 결정
         clip_durations: dict[str, float] = {}
         if audio_duration > 0 and valid_clips:
             has_narration = any(c.get("narration") for c in valid_clips)
             if has_narration:
                 clip_durations = self._distribute_duration_by_narration(
-                    valid_clips, audio_duration
+                    valid_clips, _audio_for_dist
                 )
                 logger.info(
                     f"[F006][STAGE_05R][job_id={job_id}] narration 비례 배분 적용 - "
-                    f"오디오 {audio_duration:.1f}초 / {len(valid_clips)}클립"
+                    f"오디오 {_audio_for_dist:.1f}초({_overlap_sec:.1f}s 오버랩 포함) / {_n_clips}클립"
                 )
             else:
-                per_clip_sec: float = audio_duration / len(valid_clips)
+                per_clip_sec: float = _audio_for_dist / _n_clips
                 for c in valid_clips:
                     clip_durations[c["file_path"]] = per_clip_sec
                 logger.info(
                     f"[F006][STAGE_05R][job_id={job_id}] 균등 배분 - "
-                    f"{per_clip_sec:.1f}초/클립"
+                    f"{per_clip_sec:.1f}초/클립 (오버랩 보정 포함)"
                 )
         else:
             # 오디오 없거나 duration 0인 경우 클립 자체 duration_sec 사용
@@ -430,7 +435,7 @@ class Stage05rRemotion(BaseStage, BasePipeline):
             "video_file_path": output_video_path,
             "subtitle_file_path": subtitle_file_path,
             "duration_sec": duration_sec,
-            "resolution": "1280x720",
+            "resolution": "1920x1080",
             "file_size_mb": file_size_mb,
             "has_subtitles": has_subtitles,
             "generated_at": datetime.now(timezone.utc).isoformat(),

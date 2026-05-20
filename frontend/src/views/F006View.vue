@@ -67,6 +67,19 @@ const ttsVoiceOptions = computed(() => {
         { value: 'nova', label: 'Nova' },
         { value: 'shimmer', label: 'Shimmer' },
       ]
+    case 'supertonic':
+      return [
+        { value: 'F1', label: 'F1 (여성)' },
+        { value: 'F2', label: 'F2 (여성)' },
+        { value: 'F3', label: 'F3 (여성)' },
+        { value: 'F4', label: 'F4 (여성)' },
+        { value: 'F5', label: 'F5 (여성)' },
+        { value: 'M1', label: 'M1 (남성)' },
+        { value: 'M2', label: 'M2 (남성)' },
+        { value: 'M3', label: 'M3 (남성)' },
+        { value: 'M4', label: 'M4 (남성)' },
+        { value: 'M5', label: 'M5 (남성)' },
+      ]
     default:  // coqui, gtts — 목소리 선택 없음
       return []
   }
@@ -195,7 +208,7 @@ async function submitCreateJob() {
     subtitle_enabled: subtitleEnabled.value,
     // Remotion 모드 하위 호환 — 백엔드 기존 use_remotion 필드 지원
     // cardnews는 FFmpeg 사용이므로 Remotion 미포함
-    use_remotion: ['kenburns', 'video_bg', 'remotion_native'].includes(renderMode.value),
+    use_remotion: ['kenburns', 'video_bg', 'remotion_native', 'fluid_bg'].includes(renderMode.value),
     ...(renderMode.value !== 'ffmpeg' ? {
       remotion_theme: remotionTheme.value,
       remotion_transition: remotionTransition.value,
@@ -498,6 +511,7 @@ onMounted(async () => {
               <label class="form-label">TTS 프로바이더</label>
               <select v-model="ttsProvider" class="form-select" :disabled="ttsSkip">
                 <option value="edge_tts">Edge TTS (무료, 인터넷)</option>
+                <option value="supertonic">Supertone TTS (로컬, 무료)</option>
                 <option value="gtts">Google TTS (무료, 인터넷)</option>
                 <option value="coqui">Coqui TTS (로컬)</option>
                 <option value="elevenlabs">ElevenLabs (API 키 필요)</option>
@@ -620,6 +634,18 @@ onMounted(async () => {
                 <div class="render-mode-badge premium">최고 품질</div>
               </div>
 
+              <!-- Fluid BG (파티클 애니메이션) -->
+              <div
+                class="render-mode-card"
+                :class="{ selected: renderMode === 'fluid_bg' }"
+                @click="renderMode = 'fluid_bg'"
+              >
+                <div class="render-mode-icon">🌊</div>
+                <div class="render-mode-title">Fluid BG</div>
+                <div class="render-mode-desc">파티클 유체 배경 + 글라스모피즘 카드. 가장 비주얼한 스타일.</div>
+                <div class="render-mode-badge premium">NEW</div>
+              </div>
+
               <!-- 카드뉴스 -->
               <div
                 class="render-mode-card"
@@ -728,7 +754,7 @@ onMounted(async () => {
             </div>
             <div class="summary-row">
               <span>렌더링 방식</span>
-              <strong>{{ {ffmpeg: '기본 (FFmpeg)', kenburns: 'Ken Burns', video_bg: '영상 배경', remotion_native: '네이티브 렌더링', cardnews: '카드뉴스'}[renderMode] }}</strong>
+              <strong>{{ {ffmpeg: '기본 (FFmpeg)', kenburns: 'Ken Burns', video_bg: '영상 배경', remotion_native: '네이티브 렌더링', fluid_bg: 'Fluid BG (파티클)', cardnews: '카드뉴스'}[renderMode] }}</strong>
             </div>
             <div class="summary-row" v-if="renderMode !== 'ffmpeg'">
               <span>테마</span>
