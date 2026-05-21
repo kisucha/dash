@@ -155,17 +155,46 @@ class Stage05Video(BaseStage, BasePipeline):
     def _assign_durations(self, clips: list, total_duration: float) -> None:
         """각 클립의 duration_sec을 narration 길이 비례로 설정한다.
 
-        total_duration (TTS 오디오 길이)이 있으면 비례 배분,
+        total_duration > 0이면 2-pass 알고리즘으로 합계 = total_duration 보장.
         없으면 narration 길이 기반 추정.
+
+        2-pass 알고리즘:
+          1차: 비례 배분 계산
+          2차: MIN 미달 클립을 MIN으로 올리고 남은 시간을 나머지에 재배분.
+          전체 합 = total_duration 항상 보장 (FFmpeg -shortest 싱크 오류 방지).
         """
-        narration_lengths = [len(c.get("narration", "")) for c in clips]
+        # 빈 narration도 최소 10자로 취급해 극단적 비율 방지
+        narration_lengths = [max(10, len(c.get("narration", "") or "")) for c in clips]
         total_chars = sum(narration_lengths) or 1
+        n = len(clips)
 
         if total_duration > 0:
-            # TTS 오디오 총 길이를 narration 비례로 분배
-            for clip, nar_len in zip(clips, narration_lengths):
-                proportional = total_duration * nar_len / total_chars
-                clip["duration_sec"] = max(_MIN_CLIP_DURATION, proportional)
+            # 1차: 비례 배분
+            raw = [total_duration * nar / total_chars for nar in narration_lengths]
+
+            floor_indices = [i for i, d in enumerate(raw) if d < _MIN_CLIP_DURATION]
+            non_floor_indices = [i for i, d in enumerate(raw) if d >= _MIN_CLIP_DURATION]
+            floor_total = len(floor_indices) * _MIN_CLIP_DURATION
+
+            if floor_total >= total_duration:
+                # MIN 보장만으로 total_duration 초과 시 균등 분배
+                per_clip = total_duration / n
+                logger.warning(
+                    f"[F007][STAGE_05] min {_MIN_CLIP_DURATION}s 보장으로 "
+                    f"audio_duration({total_duration:.1f}s) 초과 - "
+                    f"균등 배분 ({per_clip:.1f}s/클립)"
+                )
+                for clip in clips:
+                    clip["duration_sec"] = per_clip
+            else:
+                # 2차: MIN 미달 클립 = MIN, 나머지에 잔여 시간 재배분
+                remaining = total_duration - floor_total
+                non_floor_chars = sum(narration_lengths[i] for i in non_floor_indices) or 1
+                for i, clip in enumerate(clips):
+                    if i in floor_indices:
+                        clip["duration_sec"] = _MIN_CLIP_DURATION
+                    else:
+                        clip["duration_sec"] = remaining * (narration_lengths[i] / non_floor_chars)
         else:
             # TTS 없는 경우: narration 길이를 초당 글자 수로 나눠 추정
             for clip, nar_len in zip(clips, narration_lengths):
