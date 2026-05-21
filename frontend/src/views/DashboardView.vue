@@ -199,7 +199,9 @@ onUnmounted(() => stopPolling())
             v-for="feature in taskStore.features"
             :key="feature.feature_id"
             class="clickable-row"
-            @click="feature.feature_id === 'F006'
+            @click="feature.feature_id === 'F007'
+              ? router.push({ name: 'F007' })
+              : feature.feature_id === 'F006'
               ? router.push({ name: 'F006Feature' })
               : feature.feature_id === 'F005'
                 ? router.push({ name: 'F005Feature' })
