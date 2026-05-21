@@ -142,10 +142,21 @@ class TTSChain:
         return TTSResult(output_path, "pyttsx3", self._get_duration(output_path))
 
     def _get_duration(self, audio_path: str) -> float:
-        """ffprobe로 오디오 파일 길이(초)를 측정한다.
+        """오디오 파일 길이(초)를 측정한다.
 
-        imageio_ffmpeg를 통해 ffprobe 경로를 찾고, 실패 시 시스템 ffprobe로 폴백.
+        WAV 파일은 Python 내장 wave 모듈로 측정 (ffprobe 불필요).
+        그 외 포맷(mp3 등)은 imageio_ffmpeg를 통해 ffprobe 경로를 찾고, 실패 시 시스템 ffprobe로 폴백.
         """
+        # WAV 파일은 Python 내장 wave 모듈로 측정 (ffprobe 경로 해석 오류 방지)
+        if audio_path.lower().endswith(".wav"):
+            try:
+                import wave
+                with wave.open(audio_path, "rb") as wf:
+                    return wf.getnframes() / float(wf.getframerate())
+            except Exception as e:
+                logger.debug(f"[TTSChain] wave 모듈 측정 실패: {e}")
+
+        # 그 외 포맷(mp3 등): ffprobe 사용
         try:
             import imageio_ffmpeg  # type: ignore[import]
             ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()

@@ -18,8 +18,9 @@ from pipelines.base import BasePipeline
 logger = logging.getLogger(__name__)
 
 # channel_type별 SearXNG 검색 쿼리 템플릿 - {today} 자리 표시자 포함
+# ETF 고정 제거 -> 더 넓은 금융/경제 뉴스 수집
 _SEARCH_QUERY_MAP = {
-    "finance":  "주식 ETF 경제 투자 뉴스 {today}",
+    "finance":  "금융 경제 주식 투자 뉴스 {today}",
     "language": "영어 학습 표현 회화 유튜브 {today}",
 }
 
@@ -138,7 +139,21 @@ class Stage01Topic(BaseStage, BasePipeline):
 
         # 2. Ollama 주제 발굴 (JSON 배열 반환)
         prompt_tmpl = _TOPIC_PROMPT_MAP.get(channel_type, _TOPIC_PROMPT_MAP["finance"])
-        prompt = prompt_tmpl.format(today=today_str, search_context=search_context)
+
+        # DB에서 최근 5개 사용된 주제 조회 (같은 channel_type) - 중복 방지
+        recent_topics = self._get_recent_topics(job_id, channel_type)
+        exclusion_note = ""
+        if recent_topics:
+            exclusion_note = (
+                "\n\n[중요] 아래 주제는 최근 이미 사용했습니다. 완전히 다른 새로운 주제를 선정하세요:\n"
+                + "\n".join(f"- {t}" for t in recent_topics)
+            )
+            logger.info(
+                f"[F007][STAGE_01][job_id={job_id}] "
+                f"최근 주제 {len(recent_topics)}개 제외 지시 추가"
+            )
+
+        prompt = prompt_tmpl.format(today=today_str, search_context=search_context) + exclusion_note
         topics = []
         try:
             raw = self.call_ollama(prompt=prompt, timeout=120, num_predict=1024)
@@ -241,3 +256,43 @@ class Stage01Topic(BaseStage, BasePipeline):
             f"[STAGE_01] JSON 배열 파싱 실패 - raw 길이: {len(raw)}자"
         )
         return []
+
+    def _get_recent_topics(self, job_id: int, channel_type: str) -> list:
+        """DB에서 최근 사용된 주제 5개를 조회한다 (같은 channel_type, 현재 job 제외).
+
+        조회 실패 시 빈 리스트를 반환해 파이프라인을 계속 진행시킨다.
+        """
+        try:
+            import sqlite3
+            from pathlib import Path as _Path
+            # 프로젝트 루트/storage/dash.db 위치 계산
+            db_path = str(_Path(__file__).parent.parent.parent.parent / "storage" / "dash.db")
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute(
+                """
+                SELECT s.output_data
+                FROM stages s
+                JOIN content_jobs j ON j.id = s.job_id
+                WHERE s.stage_id = 'STAGE_01_TOPIC'
+                  AND j.feature_id = 'F007'
+                  AND j.channel_category = ?
+                  AND j.id != ?
+                  AND s.status = 'DONE'
+                ORDER BY j.id DESC
+                LIMIT 5
+                """,
+                (channel_type, job_id),
+            ).fetchall()
+            conn.close()
+            topics = []
+            for row in rows:
+                if row[0]:
+                    import json as _json
+                    d = _json.loads(row[0])
+                    t = d.get("selected_topic", "").strip()
+                    if t:
+                        topics.append(t)
+            return topics
+        except Exception as e:
+            logger.debug(f"[STAGE_01] 최근 주제 조회 실패: {e}")
+            return []

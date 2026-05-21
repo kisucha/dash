@@ -217,17 +217,21 @@ class Stage04Visual(BaseStage, BasePipeline):
                     f"chart_generator 임포트 실패 (차트 없이 진행): {e}"
                 )
 
-        # language 채널: content 슬라이드에 보조 이미지 삽입
+        # finance/language 모두 VisualFetcher 초기화 (chart 없는 content 슬라이드용)
         visual_fetcher = None
         visual_dir = None
-        if channel_type == "language":
+        try:
             from pipelines.f007_youtube_v5.stages.visual_fetcher import VisualFetcher
             visual_dir = output_dir.parent / "visuals"
             visual_dir.mkdir(parents=True, exist_ok=True)
             visual_fetcher = VisualFetcher(str(visual_dir))
             logger.info(
                 f"[F007][STAGE_04][job_id={job_id}] "
-                f"language 채널 - VisualFetcher 초기화 완료"
+                f"VisualFetcher 초기화 완료 (channel={channel_type})"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[F007][STAGE_04][job_id={job_id}] VisualFetcher 초기화 실패: {e}"
             )
 
         for slide in slides:
