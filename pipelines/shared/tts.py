@@ -95,12 +95,13 @@ class TTSChain:
             raise ImportError("supertonic 패키지 미설치 - pip install supertonic 필요")
         from supertonic import TTS as SupertonicTTS  # type: ignore[import]
         engine = SupertonicTTS(auto_download=True)
-        style = engine.get_voice_style(voice)
-        wav = engine.synthesize(
-            text=text,
+        style = engine.get_voice_style(voice_name=voice)
+        # synthesize()는 (wav_array, sample_rate) 튜플 반환
+        wav, _ = engine.synthesize(
+            text=text[:5000],
             lang="ko",
             voice_style=style,
-            total_steps=20,
+            total_steps=8,
             speed=rate,
         )
         engine.save_audio(wav, output_path)
