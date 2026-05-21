@@ -217,6 +217,19 @@ class Stage04Visual(BaseStage, BasePipeline):
                     f"chart_generator 임포트 실패 (차트 없이 진행): {e}"
                 )
 
+        # language 채널: content 슬라이드에 보조 이미지 삽입
+        visual_fetcher = None
+        visual_dir = None
+        if channel_type == "language":
+            from pipelines.f007_youtube_v5.stages.visual_fetcher import VisualFetcher
+            visual_dir = output_dir.parent / "visuals"
+            visual_dir.mkdir(parents=True, exist_ok=True)
+            visual_fetcher = VisualFetcher(str(visual_dir))
+            logger.info(
+                f"[F007][STAGE_04][job_id={job_id}] "
+                f"language 채널 - VisualFetcher 초기화 완료"
+            )
+
         for slide in slides:
             slide_no: int = slide.get("slide_no", len(clips) + 1)
             slide_type: str = slide.get("type", "content")
@@ -261,12 +274,30 @@ class Stage04Visual(BaseStage, BasePipeline):
                             f"슬라이드 {slide_no} 차트 생성 실패: {ce}"
                         )
 
+                # language 채널 content 슬라이드: 보조 이미지 fetch (chart 없을 때만)
+                visual_img_path: Optional[str] = None
+                if (
+                    visual_fetcher is not None
+                    and slide_type == "content"
+                    and chart_path is None
+                ):
+                    keyword = slide.get("title", selected_topic)
+                    visual_img_path = visual_fetcher.fetch_for_slide(
+                        slide_no=slide_no,
+                        keyword=keyword,
+                    )
+
                 # SlideRenderer: render_* 메서드는 page, total 인수 필요
+                # 분기 순서: title -> chart -> visual -> summary -> quote -> 나머지
                 if slide_type == "title":
                     img = renderer.render_title(slide, page=slide_no, total=total)
                 elif chart_path:
                     img = renderer.render_content_with_chart(
                         slide, chart_path, page=slide_no, total=total
+                    )
+                elif visual_img_path:
+                    img = renderer.render_content_with_chart(
+                        slide, visual_img_path, page=slide_no, total=total
                     )
                 elif slide_type == "summary":
                     img = renderer.render_summary(slide, page=slide_no, total=total)
