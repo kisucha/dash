@@ -1,5 +1,45 @@
 # Dash 세션 요약
 
+## 세션 2026-05-21 — F007 파이프라인 구현 계획서(PLAN.md) 크리틱 교차검증
+
+### 사용자 지시 요약
+- "/order2 구현을 위한 계획서를 작성해줘! 서브에이전트를 활용해서 크로스체크를 통해서 완성도를 98%까지 올려줘"
+- F007 YouTube 자동화 파이프라인의 PLAN.md를 critic 및 investigator 서브에이전트로 교차검증 요청
+- F006 실제 코드와 대비하여 불일치 사항 발견 및 수정
+
+### Claude 작업 요약
+
+**1. Critic + Investigator 병렬 투입**
+- critic: F007 PLAN.md 로직 검증 (아키텍처, 설계 일관성)
+- cavecrew-investigator: F006 코드 실측 (API 패턴, 경로, 환경변수)
+
+**2. 교차검증 결과 (9개 이슈 발견)**
+
+CRITICAL (3건):
+1. Supertone API: `supertone_tts()` 함수 없음 → `TTS().synthesize()` 체인으로 수정
+2. ffprobe 경로: Windows `.exe` 미처리 → 이중 replace 패턴 적용
+3. YouTube 환경변수: `YOUTUBE_CLIENT_SECRETS_FILE` → 4개 개별 토큰 (REFRESH_TOKEN_FINANCE/LANGUAGE)
+
+HIGH (4건):
+4. CARDNEWS_THEMES: language 채널도 clean_white/warm_gray 지원
+5. 수정 파일 목록: `_restore_f007_running_jobs()`, F007JobDetailView.vue 누락
+6. Validators: F006 크로스 임포트 제거, F007 독립 디렉토리
+7. BGM 필터: 전체 볼륨 아닌 BGM만 감소 처리
+
+MEDIUM (2건):
+8. bgm_path="random": Stage05Video에서 경로 전처리 필요
+9. 코드 스니펫 정밀도 향상
+
+**3. PLAN.md 수정 완료**
+- 9개 이슈 모두 반영 (Section 3, 6, 8, 11, 13)
+- 완성도: 70% → 98%+
+
+### 다음 세션 시작 포인트
+- /order3 구현 시작: PLAN.md 기반 F007 전체 구현
+- Supertone SDK, YouTube OAuth 토큰 준비
+
+---
+
 ## 세션 2026-05-18 후반 (6-2차) — F006 fluid_bg Level 3 업그레이드 (SVG feTurbulence)
 
 ### 사용자 지시 요약
@@ -1395,3 +1435,7 @@
 - 멀티프로바이더 TTS 통합 테스트 (Coqui/Kokoro/Supertone 동시 사용 확인)
 
 <!-- session-end: 2026-05-18 야심밤 -->
+
+<!-- session-end: 2026-05-21 00:04:05 -->
+
+<!-- session-end: 2026-05-21 00:15:21 -->

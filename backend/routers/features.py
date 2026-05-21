@@ -386,6 +386,13 @@ FEATURES: dict[str, dict] = {
         "supports_schedule": False,
         "input_schema": [],
     },
+    "F007": {
+        "feature_id": "F007",
+        "name": "유튜브 자동화 파이프라인 V5",
+        "description": "채널 유형(금융/언어학습) 선택 후 주제 자동 발굴부터 영상 합성까지 완전 자동화. finance 채널은 수동 승인 필수.",
+        "supports_schedule": False,
+        "input_schema": [],
+    },
 }
 
 
