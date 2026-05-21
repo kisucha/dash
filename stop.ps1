@@ -1,4 +1,4 @@
-# stop.ps1 — Dash 개발 서버 종료 스크립트
+﻿# stop.ps1 — Dash 개발 서버 종료 스크립트
 # 1순위: 포트 기반 PID 탐색 후 종료
 # 2순위: WMI CommandLine 기반 프로세스 탐색 (포트 PID가 유효하지 않을 때)
 

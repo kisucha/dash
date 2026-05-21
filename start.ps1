@@ -1,4 +1,4 @@
-# start.ps1 — Dash 개발 서버 실행 스크립트
+﻿# start.ps1 — Dash 개발 서버 실행 스크립트
 # 백엔드(FastAPI :8000)와 프론트엔드(Vite :5173)를 각각 새 창으로 실행한다
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
