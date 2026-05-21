@@ -637,6 +637,59 @@ class SlideRenderer:
         self._draw_branding_bar(img, draw)
         return img
 
+    def render_content_with_visual_bg(
+        self,
+        slide: dict,
+        visual_path: str,
+        page: int,
+        total: int,
+    ) -> "Image.Image":
+        """사진 이미지를 어두운 배경으로 깔고 텍스트를 전체 너비로 렌더링.
+
+        chart 패널(우 40%) 레이아웃과 달리 이미지가 텍스트를 가리지 않는다.
+        이미지 로드 실패 시 render_content 폴백.
+        """
+        from PIL import Image, ImageDraw
+
+        try:
+            bg = Image.open(visual_path).convert("RGB")
+            bg = bg.resize((W, H), Image.LANCZOS)
+            # 55% 다크 오버레이 - 배경 이미지를 어둡게 해 텍스트 가독성 확보
+            black = Image.new("RGB", (W, H), (0, 0, 0))
+            img = Image.blend(bg, black, alpha=0.55)
+            draw = ImageDraw.Draw(img)
+        except Exception as e:
+            logger.warning(f"[SlideRenderer] 배경 이미지 로드 실패 - render_content 폴백: {e}")
+            return self.render_content(slide, page, total)
+
+        self._draw_header(draw, slide.get("title", ""))
+        self._draw_footer(draw, slide.get("source", ""), page, total)
+
+        # bullets - 전체 너비 사용 (차트 패널 없음)
+        bullets = slide.get("bullets", [])
+        bfont = self._font(30)
+        footer_y = H - FOOTER_H
+        avail_h = footer_y - CONTENT_Y - 10
+        spacing = min(90, avail_h // max(1, len(bullets)))
+        y = CONTENT_Y + 15
+        full_text_w = W - MARGIN_X * 2 - 25
+
+        for bullet in bullets[:5]:
+            draw.ellipse(
+                [MARGIN_X, y + 12, MARGIN_X + 12, y + 24],
+                fill=self.theme["bullet_dot"],
+            )
+            lines = self._wrap_text(draw, bullet, bfont, full_text_w)
+            for i, line in enumerate(lines[:2]):
+                color = (
+                    self.theme["text_primary"] if i == 0 else self.theme["text_secondary"]
+                )
+                draw.text((MARGIN_X + 22, y + i * 35), line, font=bfont, fill=color)
+            y += spacing
+
+        self._draw_branding_bar(img, draw)
+        return img
+
     def render_quote(self, slide: dict, page: int, total: int) -> "Image.Image":
         """인용/수치 슬라이드 렌더링 (type=="quote")."""
         img, draw = self._make_base_image()

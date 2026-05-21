@@ -300,7 +300,7 @@ class Stage04Visual(BaseStage, BasePipeline):
                         slide, chart_path, page=slide_no, total=total
                     )
                 elif visual_img_path:
-                    img = renderer.render_content_with_chart(
+                    img = renderer.render_content_with_visual_bg(
                         slide, visual_img_path, page=slide_no, total=total
                     )
                 elif slide_type == "summary":
