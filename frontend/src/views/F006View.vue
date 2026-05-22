@@ -36,7 +36,7 @@ const ctaType = ref('subscribe')   // CTA 유형
 
 // ── 모달 Step 3: 미디어 설정 ──
 const ttsProvider = ref('voicebox')  // TTS 프로바이더
-const ttsVoice = ref('ko-KR-SunHiNeural')  // TTS 목소리 ID
+const ttsVoice = ref('')  // TTS 목소리 ID (voicebox: profile_id 직접입력, 미입력 시 .env 자동사용)
 const ttsRate = ref('+0%')           // TTS 발화 속도 (edge_tts 전용)
 const ttsPitch = ref('+0Hz')         // TTS 음성 피치 (edge_tts 전용)
 const ttsSkip = ref(false)           // TTS 건너뜀 여부
@@ -521,13 +521,22 @@ onMounted(async () => {
                 <option value="openai">OpenAI TTS (API 키 필요)</option>
               </select>
             </div>
+            <!-- TTS 목소리 / VoiceBox 프로파일 ID -->
             <div class="form-item">
               <label class="form-label">
                 TTS 목소리
-                <span v-if="ttsVoiceOptions.length === 0" class="optional-mark">(해당 없음)</span>
+                <span v-if="ttsProvider !== 'voicebox' && ttsVoiceOptions.length === 0" class="optional-mark">(해당 없음)</span>
               </label>
+              <input
+                v-if="ttsProvider === 'voicebox'"
+                v-model="ttsVoice"
+                type="text"
+                class="form-input"
+                placeholder=".env VOICEBOX_PROFILE_ID 자동 사용"
+                :disabled="ttsSkip"
+              />
               <select
-                v-if="ttsVoiceOptions.length > 0"
+                v-else-if="ttsVoiceOptions.length > 0"
                 v-model="ttsVoice"
                 class="form-select"
                 :disabled="ttsSkip"

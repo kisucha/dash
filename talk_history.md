@@ -1,6 +1,24 @@
 # Dash 세션 요약
 
-## 세션 2026-05-21 — F007 파이프라인 구현 계획서(PLAN.md) 크리틱 교차검증
+## 세션 2026-05-21 (2차) — F007 파이프라인 3버그 수정 구현
+
+### 사용자 지시 요약
+- F007 파이프라인 실행 후 발견된 3가지 버그 수정 및 코드 변경 이력 기록 요청
+
+### Claude 작업 요약
+- **3개 파일 수정 구현 완료** (커밋: 4e0a6ea)
+  1. `pipelines/shared/tts.py` — WAV duration 측정: ffprobe 우선 → wave 모듈 우선으로 변경
+  2. `pipelines/f007_youtube_v5/stages/stage04_visual.py` — 이미지 표시 조건 제거 (모든 채널 지원)
+  3. `pipelines/f007_youtube_v5/stages/stage01_topic.py` — "ETF" 검색어 제거 + 최근 5개 주제 제외 로직 추가
+- **code_update.md 및 talk_history.md 기록 완료**
+
+### 다음 세션 시작 포인트
+- F007 재실행으로 3버그 수정 검증 (음성 싱크, 이미지 표시, 주제 다양성)
+- 추가 버그 발견 시 반복 수정
+
+---
+
+## 세션 2026-05-21 (1차) — F007 파이프라인 구현 계획서(PLAN.md) 크리틱 교차검증
 
 ### 사용자 지시 요약
 - "/order2 구현을 위한 계획서를 작성해줘! 서브에이전트를 활용해서 크로스체크를 통해서 완성도를 98%까지 올려줘"
@@ -1439,3 +1457,55 @@ MEDIUM (2건):
 <!-- session-end: 2026-05-21 00:04:05 -->
 
 <!-- session-end: 2026-05-21 00:15:21 -->
+
+---
+
+## 세션 2026-05-22 — VoiceBox 최상위 TTS 통합 + Whisper medium 업그레이드
+
+### 사용자 지시 요약
+- VoiceBox (로컬 음성 클로닝 엔진) 검토 및 연동 요청
+- HyperFrames (영상 생성 도구) 검토 (이점 불명확하여 보류)
+- 전 파이프라인의 VoiceBox 최상위 TTS 프로바이더 추가
+- Whisper STT 모델 base → medium 업그레이드
+- UI에서 VoiceBox profile_id 입력 필드 추가
+
+### Claude 작업 요약
+
+**1. VoiceBox TTS 프로바이더 구현**
+- `shared/tts.py`:
+  - `DEFAULT_PROVIDER_ORDER` 수정 (voicebox 최우선 배치)
+  - `_voicebox()` 메서드: POST /generate (포트 17493), WAV 출력, 폴백 지원
+- F006/F007 stage03_tts.py:
+  - `_run_voicebox_tts()` 추가, voicebox dispatch 최상단
+  - WAV 파일 확장자 처리
+- F001/F004/F005 stage03_tts.py:
+  - `_run_voicebox_tts()` 추가, auto 모드에 voicebox 최상위 우선순위
+  - 출력 경로 ext 동적 처리 (.wav vs .mp3)
+
+**2. VoiceBox 자동 시작 (start.ps1)**
+- 포트 17493 TCP 연결 확인
+- 미실행 시 voicebox.exe 자동 탐색 및 실행
+- 미설치 시 경고 후 폴백 안내
+
+**3. Whisper 모델 업그레이드**
+- F001/F004/F005/F006 config.json 및 stage05_edit.py:
+  - `whisper.load_model("base")` → `"medium"` (1.5GB)
+  - 한국어 STT 정확도 대폭 향상
+
+**4. UI profile_id 입력 필드**
+- F001/F004/F005/F006/F007View 5개:
+  - VoiceBox 선택 시 profile_id 텍스트 입력 필드 표시
+  - 미입력 시 .env VOICEBOX_PROFILE_ID 폴백
+
+### 주요 결정사항
+- VoiceBox: REST API 방식 (포트 17493), 프로그램 실행 필수
+- profile_id: UI 입력 + .env 이중 구조 (사용자 유연성)
+- HyperFrames: 보류 (Remotion/FFmpeg 기존 스택 대비 이점 불명확)
+
+### 다음 세션 시작 포인트
+- VoiceBox 프로그램 설치 후 실제 음성 생성 테스트
+- Whisper medium 모델 다운로드 및 STT 정확도 검증
+- profile_id 입력 UI 동작 확인 (자동 폴백 포함)
+- 멀티프로바이더 TTS 통합 테스트
+
+<!-- session-end: 2026-05-22 -->

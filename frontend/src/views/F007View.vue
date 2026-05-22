@@ -425,14 +425,22 @@ onMounted(async () => {
               </select>
             </div>
 
-            <!-- TTS 목소리 (supertone3만 선택 가능) -->
+            <!-- TTS 목소리 / VoiceBox 프로파일 ID -->
             <div class="form-item">
               <label class="form-label">
                 TTS 목소리
-                <span v-if="ttsVoiceOptions.length === 0" class="optional-mark">(해당 없음)</span>
+                <span v-if="ttsProvider !== 'voicebox' && ttsVoiceOptions.length === 0" class="optional-mark">(해당 없음)</span>
               </label>
+              <input
+                v-if="ttsProvider === 'voicebox'"
+                v-model="ttsVoice"
+                type="text"
+                class="form-input"
+                placeholder=".env VOICEBOX_PROFILE_ID 자동 사용"
+                :disabled="ttsSkip"
+              />
               <select
-                v-if="ttsVoiceOptions.length > 0"
+                v-else-if="ttsVoiceOptions.length > 0"
                 v-model="ttsVoice"
                 class="form-select"
                 :disabled="ttsSkip"

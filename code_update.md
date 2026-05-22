@@ -1,5 +1,33 @@
 # Dash 변경 이력
 
+## [2026-05-21] F007 3버그 수정 (커밋: 4e0a6ea)
+
+- 변경 내용:
+  1. **`pipelines/shared/tts.py`** — `_get_duration()` WAV 처리 개선
+     - 이전: WAV 파일 duration을 ffprobe로만 시도 → Windows에서 경로 해석 실패 → duration_sec=0 반환
+     - 이후: WAV 파일은 Python 내장 `wave` 모듈을 우선 사용 → 정확한 duration 측정 → 음성·영상 싱크 정상화
+  
+  2. **`pipelines/f007_youtube_v5/stages/stage04_visual.py`** — 이미지 표시 채널 제한 제거
+     - 이전: `if channel_type == "language":` 조건으로 language 채널만 VisualFetcher 사용 → finance 채널은 이미지 없음
+     - 이후: 조건 제거 → 모든 채널이 Pixabay→Pexels→Unsplash→loremflickr→Pillow 폴백으로 이미지 표시
+  
+  3. **`pipelines/f007_youtube_v5/stages/stage01_topic.py`** — 동일 주제 반복 방지
+     - `_SEARCH_QUERY_MAP["finance"]` 쿼리에서 "ETF" 제거: `"금융 경제 주식 투자 뉴스 {today}"` 로 변경
+     - `_get_recent_topics(job_id, channel_type)` 메서드 추가: DB에서 최근 5개 주제 조회 후 LLM 프롬프트에 제외 목록 삽입
+     - 이전: 항상 ETF 뉴스만 선택 + 주기적 주제 반복
+     - 이후: 다양한 금융 뉴스 + 최근 5개 주제 중복 방지
+
+- 변경 이유: F007 파이프라인 실행 후 발견된 3가지 실제 결함 수정. (1) ffprobe의 크로스플랫폼 이슈로 인한 싱크 손상, (2) finance 채널의 시각 자료 부족, (3) 반복적 주제 선택으로 인한 다양성 저하.
+
+- 영향 범위:
+  - 음성 재생 시간과 동영상 길이 정확히 일치 → 싱크 오류 제거
+  - F007 finance·language 채널 모두 동일한 수준의 시각 표현
+  - 금융 뉴스 주제 선택의 다양성 증대
+
+- 담당 에이전트: user (2026-05-21)
+
+---
+
 ## [2026-05-21] F007 YouTube 자동화 파이프라인 v5 신규 구현
 
 - 변경 내용:
@@ -1907,5 +1935,58 @@
   - 기존 F006 파이프라인 영향 없음 확인 (공통 모듈은 선택적 임포트)
 
 - 담당 에이전트: pipeline-builder, web-builder, api-builder (order3에서 전체 구현), historian
+
+---
+
+## [2026-05-22] VoiceBox TTS 연동 + Whisper medium 업그레이드
+
+- 변경 내용:
+
+### 1. VoiceBox TTS 최상위 프로바이더 추가
+- `shared/tts.py`:
+  - `DEFAULT_PROVIDER_ORDER`에 voicebox 맨 앞 추가
+  - `_voicebox()` 메서드 구현 (POST /generate, profile_id, WAV 출력, 폴백 지원)
+- `f006/stage03_tts.py`:
+  - `_run_voicebox_tts()` 추가, voicebox dispatch 최상단
+  - WAV ext 처리
+- `f007/stage03_tts.py`:
+  - auto 모드에 voicebox 최상위 추가
+  - WAV ext 조건 포함
+- `F006View.vue / F007View.vue`:
+  - VoiceBox 드롭다운 최상단 추가
+  - 기본값 변경
+- VoiceBox API: POST http://127.0.0.1:17493/generate, profile_id는 .env VOICEBOX_PROFILE_ID 또는 UI 입력
+
+### 2. start.ps1 VoiceBox 자동 시작
+- 포트 17493 TCP 연결 확인 → 미실행 시 voicebox.exe 자동 탐색 후 실행
+- 미설치 시 경고 후 계속 진행 (supertone3 폴백 안내)
+
+### 3. Whisper medium 업그레이드
+- F001/F004/F005/F006 stage05_edit.py 4개:
+  - `whisper.load_model("base")` → `"medium"`
+- config.json 4개:
+  - `"whisper_model": "base"` → `"medium"`
+- medium 모델: ~1.5GB, 한국어 인식 정확도 base 대비 대폭 향상
+
+### 4. F001/F004/F005 VoiceBox 백엔드 추가
+- 3개 파이프라인 stage03_tts.py에 `_run_voicebox_tts()` 추가
+- 출력 경로 ext 동적 처리 (voicebox=.wav, 기타=.mp3)
+
+### 5. UI profile_id 입력 필드 추가
+- F001/F004/F005/F006/F007 View 5개:
+  - voicebox 선택 시 profile_id 텍스트 입력 필드 표시
+  - 미입력 시 .env VOICEBOX_PROFILE_ID 자동 사용
+
+- 변경 이유:
+  1. VoiceBox: WAV 샘플 음성 클로닝 지원 → 전 파이프라인 최상위 TTS 프로바이더로 통합
+  2. Whisper medium: 한국어 STT 품질 향상 필요 (base 대비 정확도 개선)
+  3. profile_id: 사용자별 클로닝 설정 유연성 (UI + .env 이중 구조)
+  4. VoiceBox 프로그램: start.ps1 자동 시작으로 사용자 편의성 강화
+
+- 영향 범위:
+  - 수정 파일: `shared/tts.py`, `f001/f004/f005/f006/f007` stage03_tts.py, `F001/F004/F005/F006/F007View.vue`, `config.json` 4개, `start.ps1`
+  - TTS 스택 전체 (7개 파이프라인)
+
+- 담당 에이전트: historian
 
 ---
