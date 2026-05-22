@@ -248,24 +248,43 @@ class Stage03TTS(BaseStage, BasePipeline):
 
             logger.info(f"[F004][STAGE_03][job_id={job_id}] VoiceBox 비동기 생성 대기 (gen_id={gen_id})")
 
-            poll_urls = [
-                f"{base_url}/generate/{gen_id}/audio",
-                f"{base_url}/audio/{gen_id}",
-                f"{base_url}/generate/{gen_id}",
-            ]
+            # 완료 상태 키워드 (VoiceBox status 필드 값)
+            _DONE_STATUS = {"done", "completed", "success", "finished", "complete"}
 
             audio_bytes = None
-            for attempt in range(120):  # 최대 6분 (120 × 3초)
+            for attempt in range(300):  # 최대 15분 (300 × 3초)
                 _time.sleep(3)
-                for poll_url in poll_urls:
+
+                # 1단계: /generate/{id}/status 로 완료 여부 확인
+                is_done = False
+                try:
+                    with _urllib_req.urlopen(
+                        f"{base_url}/generate/{gen_id}/status", timeout=10
+                    ) as sr:
+                        status_raw = sr.read()
+                        status_info = _json_mod.loads(status_raw)
+                        if attempt == 0:
+                            logger.info(
+                                f"[F004][STAGE_03] VoiceBox status 응답: {str(status_info)[:300]}"
+                            )
+                        status_val = str(status_info.get("status", "")).lower()
+                        is_done = status_val in _DONE_STATUS
+                except Exception as se:
+                    if attempt == 0:
+                        logger.warning(f"[F004][STAGE_03] status 조회 실패: {se}")
+
+                # 2단계: 완료됐으면 /audio/{id} 에서 WAV 획득
+                if is_done or attempt % 10 == 9:  # 완료 or 30초마다 직접 시도
                     try:
-                        with _urllib_req.urlopen(poll_url, timeout=30) as poll_resp:
-                            data = poll_resp.read()
-                            if _is_wav(data):
-                                audio_bytes = data
-                                break
+                        with _urllib_req.urlopen(
+                            f"{base_url}/audio/{gen_id}", timeout=30
+                        ) as ar:
+                            candidate = ar.read()
+                            if _is_wav(candidate):
+                                audio_bytes = candidate
                     except Exception:
-                        continue
+                        pass
+
                 if audio_bytes:
                     logger.info(
                         f"[F004][STAGE_03][job_id={job_id}] VoiceBox 생성 완료 "
@@ -275,7 +294,7 @@ class Stage03TTS(BaseStage, BasePipeline):
 
             if not audio_bytes:
                 raise RuntimeError(
-                    f"VoiceBox 오디오 생성 타임아웃 6분 초과 (gen_id={gen_id})"
+                    f"VoiceBox 오디오 생성 타임아웃 15분 초과 (gen_id={gen_id})"
                 )
 
         from pathlib import Path as _Path

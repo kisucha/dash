@@ -244,30 +244,32 @@ class Stage03TTS(BaseStage, BasePipeline):
                 raise RuntimeError(f"VoiceBox 응답이 WAV도 아니고 id도 없음: {preview}")
 
             logger.info(f"[F005][STAGE_03][job_id={job_id}] VoiceBox 비동기 생성 대기 (gen_id={gen_id})")
-            poll_urls = [
-                f"{base_url}/generate/{gen_id}/audio",
-                f"{base_url}/audio/{gen_id}",
-                f"{base_url}/generate/{gen_id}",
-            ]
-
+            _DONE_STATUS = {"done", "completed", "success", "finished", "complete"}
             audio_bytes = None
-            for attempt in range(120):
+            for attempt in range(300):
                 _time.sleep(3)
-                for poll_url in poll_urls:
+                is_done = False
+                try:
+                    with _urllib_req.urlopen(f"{base_url}/generate/{gen_id}/status", timeout=10) as sr:
+                        status_info = _json_mod.loads(sr.read())
+                        if attempt == 0:
+                            logger.info(f"[F005][STAGE_03] VoiceBox status: {str(status_info)[:300]}")
+                        is_done = str(status_info.get("status", "")).lower() in _DONE_STATUS
+                except Exception:
+                    pass
+                if is_done or attempt % 10 == 9:
                     try:
-                        with _urllib_req.urlopen(poll_url, timeout=30) as poll_resp:
-                            data = poll_resp.read()
-                            if _is_wav(data):
-                                audio_bytes = data
-                                break
+                        with _urllib_req.urlopen(f"{base_url}/audio/{gen_id}", timeout=30) as ar:
+                            candidate = ar.read()
+                            if _is_wav(candidate):
+                                audio_bytes = candidate
                     except Exception:
-                        continue
+                        pass
                 if audio_bytes:
                     logger.info(f"[F005][STAGE_03][job_id={job_id}] VoiceBox 생성 완료 (시도 {attempt + 1}회)")
                     break
-
             if not audio_bytes:
-                raise RuntimeError(f"VoiceBox 오디오 생성 타임아웃 6분 초과 (gen_id={gen_id})")
+                raise RuntimeError(f"VoiceBox 오디오 생성 타임아웃 15분 초과 (gen_id={gen_id})")
 
         from pathlib import Path as _Path
         _Path(output_path).write_bytes(audio_bytes)
