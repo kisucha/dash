@@ -1,5 +1,5 @@
 {
-  "whisper_model": "base",
+  "whisper_model": "medium",
   "tts_default_provider": "edge_tts",
   "tts_coqui_model": "tts_models/ko/css10/vits",
   "bgm_dir": "storage/bgm",

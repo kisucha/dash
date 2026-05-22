@@ -552,7 +552,7 @@ class Stage05Edit(BaseStage, BasePipeline):
             logger.info(
                 f"[F006][STAGE_05][job_id={job_id}] Whisper 자막 생성 시작: {audio_file_path}"
             )
-            model = whisper.load_model("base")
+            model = whisper.load_model("medium")
             result = model.transcribe(audio_file_path, language="ko")
             segments: list[dict] = result.get("segments", [])
 
