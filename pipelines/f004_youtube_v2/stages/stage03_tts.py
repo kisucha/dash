@@ -232,6 +232,13 @@ class Stage03TTS(BaseStage, BasePipeline):
         if not audio_bytes:
             raise RuntimeError("VoiceBox /generate 응답이 비어 있음")
 
+        # WAV 매직 바이트 확인 — 오류 JSON이 저장되는 것을 방지
+        if not (audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE"):
+            preview = audio_bytes[:200].decode("utf-8", errors="replace")
+            raise RuntimeError(
+                f"VoiceBox 응답이 유효한 WAV가 아님 (profile_id 확인 필요): {preview}"
+            )
+
         from pathlib import Path as _Path
         _Path(output_path).write_bytes(audio_bytes)
         logger.info(f"[F004][STAGE_03][job_id={job_id}] VoiceBox TTS 완료")

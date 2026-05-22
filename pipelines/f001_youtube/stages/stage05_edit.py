@@ -310,6 +310,7 @@ class Stage05Edit(BaseStage, BasePipeline):
                 "-map", "[outv]",
                 "-map", f"{audio_idx}:a",
                 "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 # -shortest 제거: 오디오 기준으로 클립을 이미 재배분했으므로 불필요
                 "-s", "1280x720",
@@ -322,6 +323,7 @@ class Stage05Edit(BaseStage, BasePipeline):
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
                 "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",
                 "-s", "1280x720",
                 "-r", "24",
                 output_video,

@@ -400,8 +400,8 @@ class Stage05Edit(BaseStage, BasePipeline):
                 "-map", "[outv]",
                 "-map", f"{audio_idx}:a",
                 "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",  # PNG RGBA/팔레트 → libx264 호환 포맷 강제
                 "-c:a", "aac",
-                # -shortest 제거: 오디오 기준으로 클립을 이미 재배분했으므로 불필요
                 "-s", "1280x720",
                 "-r", "24",
                 output_video,
@@ -412,6 +412,7 @@ class Stage05Edit(BaseStage, BasePipeline):
                 "-filter_complex", filter_complex,
                 "-map", "[outv]",
                 "-c:v", "libx264",
+                "-pix_fmt", "yuv420p",  # PNG RGBA/팔레트 → libx264 호환 포맷 강제
                 "-s", "1280x720",
                 "-r", "24",
                 output_video,
@@ -432,9 +433,13 @@ class Stage05Edit(BaseStage, BasePipeline):
         )
 
         if result.returncode != 0:
+            full_err = result.stderr or result.stdout or "(stderr 없음)"
+            logger.error(
+                f"[F004][STAGE_05][job_id={job_id}] FFmpeg 전체 오류:\n{full_err}"
+            )
             raise RuntimeError(
                 f"FFmpeg concat 실패 (exit code {result.returncode}): "
-                f"{result.stderr[:300]}"
+                f"{full_err[-2000:]}"
             )
 
         logger.info(f"[F004][STAGE_05][job_id={job_id}] FFmpeg concat 완료: {output_video}")
