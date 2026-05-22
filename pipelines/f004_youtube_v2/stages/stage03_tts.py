@@ -187,12 +187,11 @@ class Stage03TTS(BaseStage, BasePipeline):
     ) -> None:
         """VoiceBox 로컬 REST API (http://127.0.0.1:17493/generate) TTS.
 
-        환경변수:
-            VOICEBOX_BASE_URL: 기본값 http://127.0.0.1:17493
-            VOICEBOX_PROFILE_ID: 생성한 음성 프로파일 ID (필수)
-            VOICEBOX_LANGUAGE: 언어 코드 (기본 ko)
+        VoiceBox API는 비동기: POST /generate → job JSON 즉시 반환 → 폴링으로 WAV 획득.
+        폴링 엔드포인트 순서: /generate/{id}/audio → /audio/{id} → /generate/{id}
         """
         import json as _json_mod
+        import time as _time
         import urllib.request as _urllib_req
 
         base_url = os.getenv("VOICEBOX_BASE_URL", "http://127.0.0.1:17493")
@@ -224,20 +223,60 @@ class Stage03TTS(BaseStage, BasePipeline):
         )
 
         try:
-            with _urllib_req.urlopen(req, timeout=300) as resp:
-                audio_bytes = resp.read()
+            with _urllib_req.urlopen(req, timeout=60) as resp:
+                resp_bytes = resp.read()
         except Exception as e:
             raise RuntimeError(f"VoiceBox API 호출 실패 ({base_url}): {e}") from e
 
-        if not audio_bytes:
-            raise RuntimeError("VoiceBox /generate 응답이 비어 있음")
+        def _is_wav(data: bytes) -> bool:
+            return len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE"
 
-        # WAV 매직 바이트 확인 — 오류 JSON이 저장되는 것을 방지
-        if not (audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE"):
-            preview = audio_bytes[:200].decode("utf-8", errors="replace")
-            raise RuntimeError(
-                f"VoiceBox 응답이 유효한 WAV가 아님 (profile_id 확인 필요): {preview}"
-            )
+        # 동기 응답 (WAV 직접 반환) 처리
+        if _is_wav(resp_bytes):
+            audio_bytes = resp_bytes
+        else:
+            # 비동기 응답: job ID 파싱 후 폴링
+            try:
+                job_info = _json_mod.loads(resp_bytes)
+                gen_id = job_info.get("id")
+            except Exception:
+                gen_id = None
+
+            if not gen_id:
+                preview = resp_bytes[:300].decode("utf-8", errors="replace")
+                raise RuntimeError(f"VoiceBox 응답이 WAV도 아니고 id도 없음: {preview}")
+
+            logger.info(f"[F004][STAGE_03][job_id={job_id}] VoiceBox 비동기 생성 대기 (gen_id={gen_id})")
+
+            poll_urls = [
+                f"{base_url}/generate/{gen_id}/audio",
+                f"{base_url}/audio/{gen_id}",
+                f"{base_url}/generate/{gen_id}",
+            ]
+
+            audio_bytes = None
+            for attempt in range(120):  # 최대 6분 (120 × 3초)
+                _time.sleep(3)
+                for poll_url in poll_urls:
+                    try:
+                        with _urllib_req.urlopen(poll_url, timeout=30) as poll_resp:
+                            data = poll_resp.read()
+                            if _is_wav(data):
+                                audio_bytes = data
+                                break
+                    except Exception:
+                        continue
+                if audio_bytes:
+                    logger.info(
+                        f"[F004][STAGE_03][job_id={job_id}] VoiceBox 생성 완료 "
+                        f"(시도 {attempt + 1}회, gen_id={gen_id})"
+                    )
+                    break
+
+            if not audio_bytes:
+                raise RuntimeError(
+                    f"VoiceBox 오디오 생성 타임아웃 6분 초과 (gen_id={gen_id})"
+                )
 
         from pathlib import Path as _Path
         _Path(output_path).write_bytes(audio_bytes)

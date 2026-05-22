@@ -129,13 +129,53 @@ class TTSChain:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                audio_bytes = resp.read()
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp_bytes = resp.read()
         except Exception as e:
             raise RuntimeError(f"VoiceBox API 호출 실패 ({base_url}/generate): {e}") from e
 
-        if not audio_bytes:
-            raise RuntimeError("VoiceBox /generate 응답이 비어 있음")
+        def _is_wav(data: bytes) -> bool:
+            return len(data) > 12 and data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+
+        if _is_wav(resp_bytes):
+            audio_bytes = resp_bytes
+        else:
+            import time as _time
+            try:
+                job_info = json.loads(resp_bytes)
+                gen_id = job_info.get("id")
+            except Exception:
+                gen_id = None
+
+            if not gen_id:
+                preview = resp_bytes[:300].decode("utf-8", errors="replace")
+                raise RuntimeError(f"VoiceBox 응답이 WAV도 아니고 id도 없음: {preview}")
+
+            logger.info(f"[TTSChain] VoiceBox 비동기 생성 대기 (gen_id={gen_id})")
+            poll_urls = [
+                f"{base_url}/generate/{gen_id}/audio",
+                f"{base_url}/audio/{gen_id}",
+                f"{base_url}/generate/{gen_id}",
+            ]
+
+            audio_bytes = None
+            for attempt in range(120):
+                _time.sleep(3)
+                for poll_url in poll_urls:
+                    try:
+                        with urllib.request.urlopen(poll_url, timeout=30) as poll_resp:
+                            data = poll_resp.read()
+                            if _is_wav(data):
+                                audio_bytes = data
+                                break
+                    except Exception:
+                        continue
+                if audio_bytes:
+                    logger.info(f"[TTSChain] VoiceBox 생성 완료 (시도 {attempt + 1}회)")
+                    break
+
+            if not audio_bytes:
+                raise RuntimeError(f"VoiceBox 오디오 생성 타임아웃 6분 초과 (gen_id={gen_id})")
 
         Path(wav_path).write_bytes(audio_bytes)
         return TTSResult(wav_path, "voicebox", self._get_duration(wav_path))
