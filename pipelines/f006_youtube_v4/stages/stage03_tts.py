@@ -90,6 +90,17 @@ class Stage03TTS(BaseStage, BasePipeline):
         tts_pitch: str = input_data.get("tts_pitch") or "+0Hz"
         script_text: str = input_data.get("script_text", "")
 
+        # script_text가 JSON이면 slides.narration 추출
+        if script_text.strip().startswith("{"):
+            try:
+                _parsed = json.loads(script_text)
+                _parts = [s.get("narration", "").strip() for s in _parsed.get("slides", []) if s.get("narration", "").strip()]
+                if _parts:
+                    script_text = " ".join(_parts)
+                    logger.info(f"[F006][STAGE_03][job_id={job_id}] script_text JSON → narration 추출 ({len(script_text)}자)")
+            except Exception:
+                pass
+
         # 숫자 읽기 전처리: 천 단위 쉼표 제거, 소수점 "점" 변환
         script_text = self._preprocess_script_for_tts(script_text)
 

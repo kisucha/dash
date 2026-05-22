@@ -86,6 +86,18 @@ class Stage03TTS(BaseStage, BasePipeline):
         tts_pitch: str = input_data.get("tts_pitch") or "+0Hz"
         script_text: str = input_data.get("script_text", "")
 
+        # script_text가 JSON이면 slides.narration 추출 — LLM 파싱 폴백 시 JSON 청크가 들어올 수 있음
+        if script_text.strip().startswith("{"):
+            try:
+                _parsed = json.loads(script_text)
+                _slides = _parsed.get("slides", [])
+                _parts = [s.get("narration", "").strip() for s in _slides if s.get("narration", "").strip()]
+                if _parts:
+                    script_text = " ".join(_parts)
+                    logger.info(f"[F004][STAGE_03][job_id={job_id}] script_text JSON 감지 → narration 추출 ({len(script_text)}자)")
+            except Exception:
+                pass
+
         # 스크립트 텍스트 없으면 skip 처리
         if not script_text.strip():
             logger.warning(
