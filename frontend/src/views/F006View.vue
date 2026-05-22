@@ -35,7 +35,7 @@ const hookStyle = ref('question')  // 훅 스타일
 const ctaType = ref('subscribe')   // CTA 유형
 
 // ── 모달 Step 3: 미디어 설정 ──
-const ttsProvider = ref('edge_tts')  // TTS 프로바이더
+const ttsProvider = ref('voicebox')  // TTS 프로바이더
 const ttsVoice = ref('ko-KR-SunHiNeural')  // TTS 목소리 ID
 const ttsRate = ref('+0%')           // TTS 발화 속도 (edge_tts 전용)
 const ttsPitch = ref('+0Hz')         // TTS 음성 피치 (edge_tts 전용)
@@ -44,6 +44,8 @@ const ttsSkip = ref(false)           // TTS 건너뜀 여부
 // 프로바이더별 목소리 목록 (목소리 없는 프로바이더는 빈 배열)
 const ttsVoiceOptions = computed(() => {
   switch (ttsProvider.value) {
+    case 'voicebox':
+      return []  // profile_id는 .env의 VOICEBOX_PROFILE_ID 사용
     case 'edge_tts':
       return [
         { value: 'ko-KR-SunHiNeural', label: '선희 (여성)' },
@@ -510,6 +512,7 @@ onMounted(async () => {
             <div class="form-item">
               <label class="form-label">TTS 프로바이더</label>
               <select v-model="ttsProvider" class="form-select" :disabled="ttsSkip">
+                <option value="voicebox">VoiceBox (로컬, 음성 클로닝)</option>
                 <option value="edge_tts">Edge TTS (무료, 인터넷)</option>
                 <option value="supertonic">Supertone TTS (로컬, 무료)</option>
                 <option value="gtts">Google TTS (무료, 인터넷)</option>

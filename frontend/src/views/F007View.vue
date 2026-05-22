@@ -34,7 +34,7 @@ const days = ref(3)
 
 // ── Step 2: 미디어 설정 ──
 // tts_provider: TTS 프로바이더 선택
-const ttsProvider = ref('supertone3')
+const ttsProvider = ref('voicebox')
 // tts_voice: TTS 목소리 선택
 const ttsVoice = ref('F1')
 // tts_skip: TTS 건너뜀 여부
@@ -55,6 +55,9 @@ const privacy = ref('private')
 // ── TTS 목소리 옵션 ──
 // supertone3: F1/F2/F3/M1/M2, coqui/pyttsx3: 목소리 선택 없음
 const ttsVoiceOptions = computed(() => {
+  if (ttsProvider.value === 'voicebox') {
+    return []  // profile_id는 .env의 VOICEBOX_PROFILE_ID 사용
+  }
   if (ttsProvider.value === 'supertone3') {
     return [
       { value: 'F1', label: 'F1 (여성)' },
@@ -113,7 +116,7 @@ function openModal() {
   channelName.value = ''
   keywordsHint.value = ''
   days.value = 3
-  ttsProvider.value = 'supertone3'
+  ttsProvider.value = 'voicebox'
   ttsVoice.value = 'F1'
   ttsSkip.value = false
   slideTheme.value = 'dark_blue'
@@ -415,6 +418,7 @@ onMounted(async () => {
             <div class="form-item">
               <label class="form-label">TTS 프로바이더</label>
               <select v-model="ttsProvider" class="form-select" :disabled="ttsSkip">
+                <option value="voicebox">VoiceBox (로컬, 음성 클로닝)</option>
                 <option value="supertone3">Supertone3 (로컬, 고품질)</option>
                 <option value="coqui">Coqui TTS (로컬)</option>
                 <option value="pyttsx3">pyttsx3 (로컬, 기본)</option>

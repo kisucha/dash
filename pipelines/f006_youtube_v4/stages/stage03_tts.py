@@ -108,8 +108,8 @@ class Stage03TTS(BaseStage, BasePipeline):
 
         # 출력 경로 설정 - 절대 경로 (ERR-007: 상대 경로는 backend 기준으로 저장됨)
         _project_root = Path(__file__).parent.parent.parent.parent
-        # supertonic은 WAV 출력 — 나머지는 MP3
-        _audio_ext = "wav" if provider == "supertonic" else "mp3"
+        # supertonic/voicebox는 WAV 출력 — 나머지는 MP3
+        _audio_ext = "wav" if provider in ("supertonic", "voicebox") else "mp3"
         output_path: str = str(
             _project_root / "storage" / "results" / "f006" / str(job_id) / f"voiceover.{_audio_ext}"
         )
@@ -125,7 +125,10 @@ class Stage03TTS(BaseStage, BasePipeline):
 
         # 프로바이더별 TTS 실행
         try:
-            if provider == "coqui":
+            if provider == "voicebox":
+                self._run_voicebox_tts(script_text, output_path, job_id, tts_voice)
+
+            elif provider == "coqui":
                 self._run_coqui_tts(script_text, output_path, job_id)
 
             elif provider == "edge_tts":
@@ -225,6 +228,60 @@ class Stage03TTS(BaseStage, BasePipeline):
     # ------------------------------------------------------------------
     # TTS 프로바이더별 구현
     # ------------------------------------------------------------------
+
+    def _run_voicebox_tts(
+        self, script_text: str, output_path: str, job_id: int, voice: str = ""
+    ) -> None:
+        """VoiceBox 로컬 REST API (http://127.0.0.1:17493/generate) TTS.
+
+        환경변수:
+            VOICEBOX_BASE_URL: 기본값 http://127.0.0.1:17493
+            VOICEBOX_PROFILE_ID: 생성한 음성 프로파일 ID (필수)
+            VOICEBOX_LANGUAGE: 언어 코드 (기본 ko)
+        """
+        import json as _json_mod
+        import urllib.request as _urllib_req
+
+        base_url = os.getenv("VOICEBOX_BASE_URL", "http://127.0.0.1:17493")
+        profile_id = voice or os.getenv("VOICEBOX_PROFILE_ID", "")
+        language = os.getenv("VOICEBOX_LANGUAGE", "ko")
+
+        if not profile_id:
+            raise RuntimeError(
+                "VOICEBOX_PROFILE_ID 환경변수가 설정되지 않았습니다. "
+                ".env 파일에 VOICEBOX_PROFILE_ID=... 추가 후 재시도하세요."
+            )
+
+        logger.info(
+            f"[F006][STAGE_03][job_id={job_id}] VoiceBox TTS 시작 - "
+            f"profile={profile_id}, language={language}"
+        )
+
+        payload = _json_mod.dumps({
+            "text": script_text[:5000],
+            "profile_id": profile_id,
+            "language": language,
+        }).encode("utf-8")
+
+        req = _urllib_req.Request(
+            f"{base_url}/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with _urllib_req.urlopen(req, timeout=300) as resp:
+                audio_bytes = resp.read()
+        except Exception as e:
+            raise RuntimeError(f"VoiceBox API 호출 실패 ({base_url}): {e}") from e
+
+        if not audio_bytes:
+            raise RuntimeError("VoiceBox /generate 응답이 비어 있음")
+
+        from pathlib import Path as _Path
+        _Path(output_path).write_bytes(audio_bytes)
+        logger.info(f"[F006][STAGE_03][job_id={job_id}] VoiceBox TTS 완료")
 
     def _run_coqui_tts(self, script_text: str, output_path: str, job_id: int) -> None:
         """Coqui TTS CLI subprocess 호출.

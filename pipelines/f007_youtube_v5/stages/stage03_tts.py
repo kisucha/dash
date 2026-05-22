@@ -109,7 +109,7 @@ class Stage03TTS(BaseStage, BasePipeline):
         # 프로바이더 순서 결정 - auto이면 전체 폴백 체인, 아니면 지정 프로바이더 우선
         provider_order: list
         if tts_provider == "auto":
-            provider_order = ["supertone3", "coqui", "pyttsx3"]
+            provider_order = ["voicebox", "supertone3", "coqui", "pyttsx3"]
         else:
             # 지정 프로바이더 우선, 실패 시 coqui -> pyttsx3 순서로 폴백
             fallback = ["coqui", "pyttsx3"]
@@ -117,7 +117,7 @@ class Stage03TTS(BaseStage, BasePipeline):
 
         # supertone3가 첫 번째 provider이면 WAV, 나머지는 MP3
         # supertonic 라이브러리는 WAV 포맷으로 출력한다
-        _ext = "wav" if provider_order[0] == "supertone3" else "mp3"
+        _ext = "wav" if provider_order[0] in ("supertone3", "voicebox") else "mp3"
         audio_path = str(audio_dir / f"tts_output.{_ext}")
 
         chain = TTSChain(provider_order=provider_order)

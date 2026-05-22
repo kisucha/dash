@@ -15,8 +15,8 @@ import importlib.util
 
 logger = logging.getLogger(__name__)
 
-# 기본 프로바이더 시도 순서 - Supertone3(고품질) > Coqui(오픈소스) > pyttsx3(로컬 폴백)
-DEFAULT_PROVIDER_ORDER = ["supertone3", "coqui", "pyttsx3"]
+# 기본 프로바이더 시도 순서 - VoiceBox(로컬 REST) > Supertone3(고품질) > Coqui(오픈소스) > pyttsx3(로컬 폴백)
+DEFAULT_PROVIDER_ORDER = ["voicebox", "supertone3", "coqui", "pyttsx3"]
 
 
 class TTSResult:
@@ -68,7 +68,9 @@ class TTSChain:
         last_error = None
         for provider in self.provider_order:
             try:
-                if provider == "supertone3":
+                if provider == "voicebox":
+                    result = self._voicebox(text, output_path, voice, timeout)
+                elif provider == "supertone3":
                     result = self._supertone3(text, output_path, voice, rate, timeout)
                 elif provider == "coqui":
                     result = self._coqui(text, output_path, timeout)
@@ -85,6 +87,58 @@ class TTSChain:
                 last_error = e
                 logger.warning(f"[TTSChain] {provider} 실패 - 다음 프로바이더 시도: {e}")
         raise RuntimeError(f"모든 TTS 프로바이더 실패. 마지막 오류: {last_error}")
+
+    def _voicebox(self, text: str, output_path: str, voice: str, timeout: int) -> TTSResult:
+        """VoiceBox 로컬 REST API (http://127.0.0.1:17493/generate) TTS.
+
+        VoiceBox가 로컬에서 실행 중이어야 한다 (MSI 설치 후 실행).
+        환경변수:
+            VOICEBOX_BASE_URL: 기본값 http://127.0.0.1:17493
+            VOICEBOX_PROFILE_ID: 생성한 음성 프로파일 ID (필수)
+            VOICEBOX_LANGUAGE: 언어 코드 (기본 ko)
+        """
+        import os
+        import json as _json_mod
+        import urllib.request
+
+        base_url = os.environ.get("VOICEBOX_BASE_URL", "http://127.0.0.1:17493")
+        profile_id = voice or os.environ.get("VOICEBOX_PROFILE_ID", "")
+        language = os.environ.get("VOICEBOX_LANGUAGE", "ko")
+
+        if not profile_id:
+            raise ImportError("VOICEBOX_PROFILE_ID 미설정 - VoiceBox 프로파일 ID를 .env에 추가하세요")
+
+        # VoiceBox는 WAV 출력 - 확장자 강제 .wav
+        wav_path = (
+            output_path
+            if output_path.lower().endswith(".wav")
+            else output_path.rsplit(".", 1)[0] + ".wav"
+        )
+
+        payload = _json_mod.dumps({
+            "text": text[:5000],
+            "profile_id": profile_id,
+            "language": language,
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            f"{base_url}/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                audio_bytes = resp.read()
+        except Exception as e:
+            raise RuntimeError(f"VoiceBox API 호출 실패 ({base_url}/generate): {e}") from e
+
+        if not audio_bytes:
+            raise RuntimeError("VoiceBox /generate 응답이 비어 있음")
+
+        Path(wav_path).write_bytes(audio_bytes)
+        return TTSResult(wav_path, "voicebox", self._get_duration(wav_path))
 
     def _supertone3(self, text: str, output_path: str, voice: str, rate: float, timeout: int) -> TTSResult:
         """Supertone3(supertonic) 패키지로 TTS 합성.
