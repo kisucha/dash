@@ -398,8 +398,8 @@ class Stage02Script(BaseStage, BasePipeline):
         # 코드펜스 제거
         cleaned: str = re.sub(r"```(?:json)?\s*", "", raw).strip()
         cleaned = re.sub(r"```\s*", "", cleaned).strip()
-        # 주석 라인 제거 (// ... 패턴)
-        cleaned = re.sub(r"//[^\n]*", "", cleaned)
+        # 줄 시작 주석만 제거 (// ... 패턴) — 문자열 내 URL(https://) 보존
+        cleaned = re.sub(r"^\s*//[^\n]*", "", cleaned, flags=re.MULTILINE)
 
         # 1단계: dict { "slides": [...] } 형태 파싱
         brace_start: int = cleaned.find("{")
@@ -452,17 +452,14 @@ class Stage02Script(BaseStage, BasePipeline):
             f"[F007][STAGE_02] JSON 파싱 실패 - 폴백 슬라이드 생성 "
             f"(목표 {n_slides}장, raw 길이 {len(raw)}자, channel_type={channel_type})"
         )
-        raw_part1: str = raw[:300].strip()
-        raw_part2: str = raw[300:800].strip()
-        raw_part3: str = raw[800:1100].strip()
-
+        # raw JSON 조각을 narration에 넣으면 TTS가 JSON 구문을 읽으므로 안전한 기본 텍스트 사용
         fallback_slides = [
             {
                 "slide_no": 1,
                 "type": "title",
                 "title": selected_topic[:20],
                 "subtitle": "",
-                "narration": raw_part1 if raw_part1 else f"{selected_topic} 주제로 시작합니다.",
+                "narration": f"{selected_topic} 주제로 시작합니다.",
             },
             {
                 "slide_no": 2,
@@ -470,14 +467,14 @@ class Stage02Script(BaseStage, BasePipeline):
                 "title": "주요 내용",
                 "bullets": ["내용을 확인하세요"],
                 "source": "",
-                "narration": raw_part2 if raw_part2 else "주요 내용을 설명합니다.",
+                "narration": "주요 내용을 설명합니다.",
             },
             {
                 "slide_no": 3,
                 "type": "summary",
                 "title": "핵심 요약",
                 "bullets": [f"주제: {selected_topic[:20]}"],
-                "narration": raw_part3 if raw_part3 else "오늘 영상을 마칩니다. 구독 부탁드립니다.",
+                "narration": "오늘 영상을 마칩니다. 구독 부탁드립니다.",
             },
         ]
         # finance 채널: 면책 슬라이드 필수 추가 (법적 요건)
